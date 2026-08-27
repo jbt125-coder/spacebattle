@@ -90,6 +90,16 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 .shipCardName{font-weight:800;letter-spacing:1.5px;font-size:12px;margin-top:4px;}
 .shipCardRole{font-size:9px;color:rgba(150,180,220,0.6);margin-top:2px;letter-spacing:1px;text-transform:uppercase;}
 #shipDetail{margin-top:14px;width:100%;max-width:520px;border:1px solid rgba(0,212,255,0.2);border-left:3px solid #00d4ff;background:rgba(10,20,35,0.8);border-radius:8px;padding:12px 14px;font-size:11.5px;color:rgba(200,220,240,0.85);line-height:1.5;min-height:50px;}
+#gemBankRow{font-size:12px;letter-spacing:2px;color:#66eaff;text-shadow:0 0 10px rgba(102,234,255,0.55);margin-bottom:14px;display:flex;align-items:center;gap:6px;}
+#gemBankRow .gicon{font-size:14px;}
+#shipStatsBlock{margin-top:10px;}
+.statRow{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:10.5px;}
+.statRow span:last-child{color:#66eaff;}
+#upgradeBlock{margin-top:12px;display:flex;flex-direction:column;gap:6px;}
+.upgradeBtn{display:flex;justify-content:space-between;align-items:center;width:100%;background:rgba(0,212,255,0.07);border:1px solid rgba(0,212,255,0.35);border-radius:6px;color:#66eaff;font-family:inherit;font-size:10px;letter-spacing:1px;padding:9px 11px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+.upgradeBtn:disabled{opacity:0.35;cursor:default;}
+.upgradeBtn .lvl{color:rgba(200,220,240,0.5);font-size:9px;margin-left:5px;}
+.upgradeBtn .cost{color:#ffb020;font-size:9px;white-space:nowrap;}
 #launchBtn{margin-top:18px;margin-bottom:24px;background:rgba(0,212,255,0.1);border:2px solid #00d4ff;color:#00d4ff;font-family:‘Orbitron’,monospace;font-weight:800;letter-spacing:3px;font-size:15px;padding:13px 40px;border-radius:8px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
 
 /* End screens */
@@ -192,8 +202,13 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 <div id="selectScreen">
   <h1>SPACE RANGERS</h1>
   <div id="selectSub">Choose your ranger -- Arena Protocol</div>
+  <div id="gemBankRow"><span class="gicon">&#9670;</span>HANGAR CHEST: <span id="gemBankVal">0</span> GEMS</div>
   <div id="roster"></div>
-  <div id="shipDetail">Select a ranger to view dossier.</div>
+  <div id="shipDetail">
+    <div id="shipDetailInfo">Select a ranger to view dossier.</div>
+    <div id="shipStatsBlock"></div>
+    <div id="upgradeBlock"></div>
+  </div>
   <button id="launchBtn">LAUNCH</button>
 </div>
 
@@ -257,18 +272,21 @@ var SHIPS = [
 ];
 
 /* =====================================================================
-   PERSISTENT PROGRESSION -- per-ship gems and level-ups (localStorage)
-   Every 10 lifetime gems for a ship triggers one random +10% bonus
-   (speed, damage, or shield), stacking permanently for that ship only.
+   PERSISTENT PROGRESSION (localStorage)
+   Gems earned in battle are collected into one shared hangar chest.
+   In the hangar, spend 10 chest gems to permanently upgrade a chosen
+   stat (+10% speed / damage / shield) on whichever ship you choose --
+   upgrades are saved per-ship and stack forever.
 ===================================================================== */
-var SAVE_KEY='spaceRangersArenaProgress_v1';
-var GEMS_PER_LEVEL=10;
+var SAVE_KEY='spaceRangersArenaProgress_v2';
+var LEGACY_SAVE_KEY='spaceRangersArenaProgress_v1';
+var GEMS_PER_UPGRADE=10;
 var progress=null;
 
 function defaultProgress(){
-  var p={};
+  var p={bank:0, ships:{}};
   for(var i=0;i<SHIPS.length;i++){
-    p[SHIPS[i].id]={gemsTotal:0, speedLvl:0, damageLvl:0, shieldLvl:0};
+    p.ships[SHIPS[i].id]={speedLvl:0, damageLvl:0, shieldLvl:0};
   }
   return p;
 }
@@ -277,11 +295,31 @@ function loadProgress(){
   try{
     var raw=window.localStorage.getItem(SAVE_KEY);
     if(raw) p=JSON.parse(raw);
+    if(!p){
+      // Migrate an older save (per-ship gem totals + auto-applied levels):
+      // keep whatever levels were already earned, and refund any gems
+      // banked toward an unclaimed level into the new shared chest.
+      var legacyRaw=window.localStorage.getItem(LEGACY_SAVE_KEY);
+      if(legacyRaw){
+        var legacy=JSON.parse(legacyRaw);
+        p={bank:0, ships:{}};
+        for(var id in legacy){
+          if(!legacy.hasOwnProperty(id)) continue;
+          var lp=legacy[id]||{};
+          p.ships[id]={speedLvl:lp.speedLvl||0, damageLvl:lp.damageLvl||0, shieldLvl:lp.shieldLvl||0};
+          var applied=(lp.speedLvl||0)+(lp.damageLvl||0)+(lp.shieldLvl||0);
+          var leftover=(lp.gemsTotal||0) - applied*GEMS_PER_UPGRADE;
+          if(leftover>0) p.bank += leftover;
+        }
+      }
+    }
   }catch(e){ p=null; }
   if(!p) p=defaultProgress();
-  // Fill in any ships missing from an older save
+  if(typeof p.bank!=='number') p.bank=0;
+  if(!p.ships) p.ships={};
+  // Fill in any ships missing from an older/partial save
   for(var i=0;i<SHIPS.length;i++){
-    if(!p[SHIPS[i].id]) p[SHIPS[i].id]={gemsTotal:0, speedLvl:0, damageLvl:0, shieldLvl:0};
+    if(!p.ships[SHIPS[i].id]) p.ships[SHIPS[i].id]={speedLvl:0, damageLvl:0, shieldLvl:0};
   }
   return p;
 }
@@ -290,9 +328,9 @@ function saveProgress(){
 }
 progress=loadProgress();
 
-function getShipProgress(shipId){ return progress[shipId]; }
+function getShipProgress(shipId){ return progress.ships[shipId]; }
 
-// Effective (leveled-up) stats for a ship, derived from its base def + progress
+// Effective (upgraded) stats for a ship, derived from its base def + progress
 function getEffectiveStats(def){
   var p=getShipProgress(def.id);
   return {
@@ -303,29 +341,15 @@ function getEffectiveStats(def){
   };
 }
 
-// Award one level-up to a random stat for this ship, persist it
-function awardLevelUp(shipId){
-  var p=getShipProgress(shipId);
-  var stats=['speedLvl','damageLvl','shieldLvl'];
-  var pick=stats[rndI(0,stats.length-1)];
-  p[pick]++;
+// Spend GEMS_PER_UPGRADE from the shared chest to add one +10% level of
+// `stat` ('speedLvl'|'damageLvl'|'shieldLvl') to the chosen ship. Returns
+// true if the purchase succeeded (false if the chest doesn't have enough).
+function purchaseUpgrade(shipId, stat){
+  if(progress.bank < GEMS_PER_UPGRADE) return false;
+  progress.bank -= GEMS_PER_UPGRADE;
+  progress.ships[shipId][stat]++;
   saveProgress();
-  return pick;
-}
-
-// Call after gems change for a ship -- awards as many level-ups as earned,
-// returns array of stat names leveled (usually 0 or 1 per match)
-function checkLevelUps(shipId){
-  var p=getShipProgress(shipId);
-  var earned=Math.floor(p.gemsTotal/GEMS_PER_LEVEL);
-  var alreadyApplied=p.speedLvl+p.damageLvl+p.shieldLvl;
-  var leveled=[];
-  while(alreadyApplied<earned){
-    var stat=awardLevelUp(shipId);
-    leveled.push(stat);
-    alreadyApplied++;
-  }
-  return leveled;
+  return true;
 }
 
 /* =====================================================================
@@ -924,13 +948,59 @@ function buildRoster(){
 function updateDetail(){
   var d=document.getElementById('shipDetail');
   d.style.borderLeftColor=selectedShip.color;
+
+  var info=document.getElementById('shipDetailInfo');
+  info.innerHTML='<b style="color:'+selectedShip.color+';">'+selectedShip.name+'</b> -- '+selectedShip.role+'<br>'+selectedShip.desc+'<br><br><b style="color:'+selectedShip.color+';">'+selectedShip.ability.name+':</b> '+selectedShip.ability.desc;
+
   var p=getShipProgress(selectedShip.id);
-  var gemsIntoLevel = p.gemsTotal % GEMS_PER_LEVEL;
-  var progLine = 'GEMS: '+p.gemsTotal+' total ('+gemsIntoLevel+'/'+GEMS_PER_LEVEL+' to next level-up)';
-  var bonusLine = 'SPEED +'+(p.speedLvl*10)+'%&nbsp;&nbsp;DAMAGE +'+(p.damageLvl*10)+'%&nbsp;&nbsp;SHIELD +'+(p.shieldLvl*10)+'%';
-  d.innerHTML='<b style="color:'+selectedShip.color+';">'+selectedShip.name+'</b> -- '+selectedShip.role+'<br>'+selectedShip.desc+'<br><br><b style="color:'+selectedShip.color+';">'+selectedShip.ability.name+':</b> '+selectedShip.ability.desc+'<br><br><span style="color:#66eaff;">'+progLine+'</span><br><span style="color:rgba(200,220,240,0.7);">'+bonusLine+'</span>';
+  var eff=getEffectiveStats(selectedShip);
+  var statsBlock=document.getElementById('shipStatsBlock');
+  statsBlock.innerHTML=
+    '<div class="statRow"><span>HULL (HP)</span><span>'+eff.hp+'</span></div>'+
+    '<div class="statRow"><span>SPEED</span><span>Lv.'+p.speedLvl+' (+'+(p.speedLvl*10)+'%)</span></div>'+
+    '<div class="statRow"><span>DAMAGE</span><span>Lv.'+p.damageLvl+' (+'+(p.damageLvl*10)+'%)</span></div>'+
+    '<div class="statRow"><span>SHIELD</span><span>Lv.'+p.shieldLvl+' (+'+(p.shieldLvl*10)+'%)</span></div>';
+
+  buildUpgradeButtons();
+  updateGemBankDisplay();
+
   document.getElementById('launchBtn').style.borderColor=selectedShip.color;
   document.getElementById('launchBtn').style.color=selectedShip.color;
+}
+
+function updateGemBankDisplay(){
+  var el=document.getElementById('gemBankVal');
+  if(el) el.textContent=progress.bank;
+}
+
+// Builds the three "spend gems on this ship" buttons for whichever ship
+// is currently selected in the hangar. Re-run after every purchase so
+// levels, costs and affordability all stay in sync with progress/bank.
+var UPGRADE_DEFS=[
+  {stat:'speedLvl', label:'SPEED'},
+  {stat:'damageLvl', label:'DAMAGE'},
+  {stat:'shieldLvl', label:'SHIELD'}
+];
+function buildUpgradeButtons(){
+  var wrap=document.getElementById('upgradeBlock');
+  wrap.innerHTML='';
+  var p=getShipProgress(selectedShip.id);
+  var ship=selectedShip;
+  for(var i=0;i<UPGRADE_DEFS.length;i++){
+    (function(entry){
+      var btn=document.createElement('button');
+      btn.className='upgradeBtn';
+      btn.disabled = progress.bank < GEMS_PER_UPGRADE;
+      btn.innerHTML='<span>UPGRADE '+entry.label+'<span class="lvl">Lv.'+p[entry.stat]+'</span></span><span class="cost">'+GEMS_PER_UPGRADE+' &#9670;</span>';
+      btn.addEventListener('click', function(){
+        if(purchaseUpgrade(ship.id, entry.stat)){
+          showAlert(ship.name+' '+entry.label+' UPGRADED! (+10%)', 2400);
+          updateDetail();
+        }
+      });
+      wrap.appendChild(btn);
+    })(UPGRADE_DEFS[i]);
+  }
 }
 
 var cardT=0;
@@ -1059,27 +1129,11 @@ function updateGems(dt){
       g.alive=false;
       gems.splice(i,1);
       gemsCollectedThisMatch++;
-      var p=getShipProgress(selectedShip.id);
-      p.gemsTotal++;
+      progress.bank++;
       saveProgress();
-      var leveled=checkLevelUps(selectedShip.id);
       spawnBurst(player.x,player.y,'#66eaff',14);
       sfxAbility();
-      if(leveled.length>0){
-        var statName = leveled[0]==='speedLvl' ? 'SPEED' : (leveled[0]==='damageLvl' ? 'DAMAGE' : 'SHIELD');
-        showAlert('GEM COLLECTED -- LEVEL UP: +10% '+statName, 3200);
-        // Re-derive effective stats immediately so the boost applies mid-match.
-        // Raise the max HP ceiling but keep current HP the same absolute amount
-        // (a shield-level-up effectively grants the extra HP as bonus healing).
-        var oldMax=player.maxHp;
-        player.eff = getEffectiveStats(player.def);
-        var newMax = player.eff.hp;
-        var gained = newMax - oldMax;
-        player.maxHp = newMax;
-        player.hp = clamp(player.hp + Math.max(0,gained), 1, newMax);
-      } else {
-        showAlert('GEM COLLECTED ('+gemsCollectedThisMatch+'/'+GEMS_TO_WIN+')', 2000);
-      }
+      showAlert('GEM COLLECTED ('+gemsCollectedThisMatch+'/'+GEMS_TO_WIN+') -- CHEST: '+progress.bank, 2000);
       updateHUD();
     }
   }
