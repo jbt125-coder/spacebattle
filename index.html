@@ -9,6 +9,7 @@
 <title>SPACE RANGERS ARENA</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
 <script src="https://www.youtube.com/iframe_api"></script>
+<script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
 html{height:100%;overflow:hidden;}
@@ -117,7 +118,26 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 .upgradeBtn:disabled{opacity:0.35;cursor:default;}
 .upgradeBtn .lvl{color:rgba(200,220,240,0.5);font-size:9px;margin-left:5px;}
 .upgradeBtn .cost{color:#ffb020;font-size:9px;white-space:nowrap;}
-#launchBtn{margin-top:18px;margin-bottom:24px;background:rgba(0,212,255,0.1);border:2px solid #00d4ff;color:#00d4ff;font-family:‘Orbitron’,monospace;font-weight:800;letter-spacing:3px;font-size:15px;padding:13px 40px;border-radius:8px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+#hangarActions{display:flex;flex-direction:column;align-items:center;margin-top:18px;margin-bottom:24px;}
+#launchBtn{background:rgba(0,212,255,0.1);border:2px solid #00d4ff;color:#00d4ff;font-family:‘Orbitron’,monospace;font-weight:800;letter-spacing:3px;font-size:15px;padding:13px 40px;border-radius:8px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+#inviteFriendBtn{margin-top:10px;background:transparent;border:1px solid rgba(0,212,255,0.4);color:#66eaff;font-family:inherit;font-weight:700;letter-spacing:2px;font-size:10px;padding:9px 22px;border-radius:6px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+
+/* Invite / join multiplayer UI */
+#inviteModalOverlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.65);z-index:96;display:none;align-items:center;justify-content:center;padding:16px;}
+#inviteModalOverlay.show{display:flex;}
+#inviteModalCard{background:rgba(0,10,24,0.98);border:1px solid rgba(0,212,255,0.3);border-radius:14px;padding:22px 22px 20px;max-width:360px;width:100%;position:relative;}
+#inviteModalCard h2{font-size:14px;letter-spacing:2px;margin-bottom:14px;text-align:center;color:#00d4ff;}
+#closeInviteModal{position:absolute;top:13px;right:15px;background:transparent;border:none;color:rgba(0,212,255,0.55);font-size:19px;cursor:pointer;line-height:1;-webkit-tap-highlight-color:transparent;}
+#inviteStatus{font-size:11px;color:#66eaff;text-align:center;margin-bottom:14px;line-height:1.5;}
+#inviteLinkRow{display:flex;gap:6px;margin-bottom:14px;}
+#inviteLinkInput{flex:1;min-width:0;background:rgba(0,18,38,0.95);border:1px solid rgba(0,212,255,0.3);border-radius:5px;color:#66eaff;font-size:10px;padding:9px 8px;font-family:inherit;}
+#copyInviteBtn,#shareInviteBtn{flex-shrink:0;background:rgba(0,212,255,0.12);border:1px solid rgba(0,212,255,0.5);color:#00d4ff;font-family:inherit;font-size:9px;letter-spacing:1px;padding:0 12px;border-radius:5px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+#inviteHint{font-size:9.5px;color:rgba(180,210,240,0.55);line-height:1.6;text-align:center;}
+
+#joinScreen{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,rgba(0,80,120,0.18),transparent 60%),#000;z-index:92;display:none;align-items:center;justify-content:center;padding:20px;}
+#joinCard{text-align:center;max-width:320px;}
+#joinCard h2{font-size:20px;font-weight:900;letter-spacing:4px;color:#00d4ff;text-shadow:0 0 8px rgba(0,212,255,0.6);margin-bottom:18px;}
+#joinStatus{font-size:12px;color:#66eaff;line-height:1.7;letter-spacing:1px;}
 
 /* End screens */
 .screen{position:fixed;top:0;left:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:28px;z-index:50;}
@@ -230,7 +250,10 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
     <button id="carouselRightBtn" class="carouselArrow" aria-label="Next ship">&#10095;</button>
   </div>
   <div id="shipDetail">Select a ranger to view dossier.</div>
-  <button id="launchBtn">LAUNCH</button>
+  <div id="hangarActions">
+    <button id="launchBtn">LAUNCH</button>
+    <button id="inviteFriendBtn">&#9670; INVITE FRIEND</button>
+  </div>
 </div>
 
 <div id="upgradeModalOverlay">
@@ -241,6 +264,27 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
     <div id="upgradeModalGemRow">CHEST: <span id="upgradeModalGemVal">0</span> GEMS</div>
     <div id="upgradeModalStats"></div>
     <div id="upgradeModalButtons"></div>
+  </div>
+</div>
+
+<div id="inviteModalOverlay">
+  <div id="inviteModalCard">
+    <button id="closeInviteModal">X</button>
+    <h2>INVITE A FRIEND</h2>
+    <div id="inviteStatus">Connecting to matchmaking service...</div>
+    <div id="inviteLinkRow" style="display:none;">
+      <input id="inviteLinkInput" type="text" readonly>
+      <button id="copyInviteBtn">COPY</button>
+      <button id="shareInviteBtn" style="display:none;">SHARE</button>
+    </div>
+    <p id="inviteHint">Send the link however you like -- text, chat, email. When they open it, they'll pick their own ship and join your battle. Works best when you're both online.</p>
+  </div>
+</div>
+
+<div id="joinScreen">
+  <div id="joinCard">
+    <h2>SPACE RANGERS</h2>
+    <div id="joinStatus">Connecting...</div>
   </div>
 </div>
 
@@ -362,15 +406,25 @@ progress=loadProgress();
 
 function getShipProgress(shipId){ return progress.ships[shipId]; }
 
-// Effective (upgraded) stats for a ship, derived from its base def + progress
-function getEffectiveStats(def){
-  var p=getShipProgress(def.id);
+// Effective (upgraded) stats for a ship given a specific set of upgrade
+// levels. Shared by getEffectiveStats (this device's own progress) and by
+// the host's multiplayer code, which computes a connected guest's ship
+// stats from the levels the guest reports for their own save -- never
+// from this device's own `progress`, since the guest's chest/upgrades
+// live only in their own browser.
+function effectiveStatsFromLevels(def, levels){
   return {
-    maxSpeed: def.maxSpeed * (1 + 0.10*p.speedLvl),
-    thrustPower: def.thrustPower * (1 + 0.10*p.speedLvl),
-    bulletDamage: def.bulletDamage * (1 + 0.10*p.damageLvl),
-    hp: Math.round(def.hp * (1 + 0.10*p.shieldLvl))
+    maxSpeed: def.maxSpeed * (1 + 0.10*levels.speedLvl),
+    thrustPower: def.thrustPower * (1 + 0.10*levels.speedLvl),
+    bulletDamage: def.bulletDamage * (1 + 0.10*levels.damageLvl),
+    hp: Math.round(def.hp * (1 + 0.10*levels.shieldLvl))
   };
+}
+
+// Effective (upgraded) stats for a ship, derived from its base def + this
+// device's own progress.
+function getEffectiveStats(def){
+  return effectiveStatsFromLevels(def, getShipProgress(def.id));
 }
 
 // Spend GEMS_PER_UPGRADE from the shared chest to add one +10% level of
@@ -513,7 +567,7 @@ function placeShieldStation(){
 
 function updateShieldStation(dt){
   shieldStation.pulse += dt*0.002;
-  var all=[player].concat(bots);
+  var all=allShips();
   for(var i=0;i<all.length;i++){
     var e=all[i];
     if(!e.alive) continue;
@@ -533,7 +587,7 @@ var IDLE_REGEN_DELAY=2500;   // ms of no firing/thrusting before regen kicks in
 var IDLE_REGEN_RATE=0.010;   // fraction of max HP healed per second once idle
 
 function updateIdleRegen(dt){
-  var all=[player].concat(bots);
+  var all=allShips();
   for(var i=0;i<all.length;i++){
     var e=all[i];
     if(!e.alive) continue;
@@ -1109,13 +1163,52 @@ function animateCards(){
 }
 
 function showSelectScreen(){
+  if(joinRoomId && netRole!=='guest'){
+    document.getElementById('joinScreen').style.display='flex';
+    document.getElementById('joinStatus').textContent='Connecting to the host...';
+    guestBeginConnect();
+    return;
+  }
   document.getElementById('selectScreen').style.display='flex';
+  document.getElementById('inviteFriendBtn').style.display = netRole==='guest' ? 'none' : 'inline-block';
   updateDetail();
 }
 document.getElementById('launchBtn').addEventListener('click',function(){
+  if(netRole==='guest'){
+    document.getElementById('selectScreen').style.display='none';
+    document.getElementById('joinScreen').style.display='flex';
+    document.getElementById('joinStatus').textContent='Ship chosen! Waiting for the host to launch...';
+    netSend({type:'chooseShip', shipId:selectedShip.id, levels:getShipProgress(selectedShip.id)});
+    return;
+  }
   document.getElementById('selectScreen').style.display='none';
   startGame();
 });
+document.getElementById('inviteFriendBtn').addEventListener('click',function(){
+  document.getElementById('inviteModalOverlay').classList.add('show');
+  if(!netPeer) hostCreateInvite();
+});
+document.getElementById('closeInviteModal').addEventListener('click', closeInviteModal);
+document.getElementById('inviteModalOverlay').addEventListener('click',function(e){ if(e.target===this) closeInviteModal(); });
+document.getElementById('copyInviteBtn').addEventListener('click',function(){
+  var input=document.getElementById('inviteLinkInput');
+  input.select();
+  try{
+    navigator.clipboard.writeText(input.value).then(function(){
+      document.getElementById('copyInviteBtn').textContent='COPIED!';
+      setTimeout(function(){ document.getElementById('copyInviteBtn').textContent='COPY'; }, 1600);
+    });
+  }catch(e){
+    try{ document.execCommand('copy'); }catch(e2){}
+  }
+});
+if(navigator.share){
+  document.getElementById('shareInviteBtn').style.display='inline-block';
+  document.getElementById('shareInviteBtn').addEventListener('click',function(){
+    var link=document.getElementById('inviteLinkInput').value;
+    if(link) navigator.share({title:'Space Rangers Arena', text:'Join my battle!', url:link}).catch(function(){});
+  });
+}
 
 renderCarousel();
 animateCards();
@@ -1126,6 +1219,22 @@ animateCards();
 var player, bots=[], bullets=[], particles=[], gems=[];
 var killCount=0, gameActive=false, alertTimer=0, lastTime=0;
 var TOTAL_BOTS=6;
+
+// Host-only: the connected guest's ship, simulated alongside `player` and
+// `bots` but never touched by updateBotAI. Null when playing solo or on
+// the guest's own client (the guest never simulates -- see MULTIPLAYER).
+var remotePlayer=null;
+var lastGuestInput={turnLeft:false, turnRight:false, thrustOn:false, fireOn:false};
+
+// All currently-relevant combat entities -- used everywhere the old code
+// iterated [player].concat(bots), so remotePlayer participates in shield
+// station healing, idle regen, bullet targeting, AI threat awareness, etc.
+// without hand-editing every call site.
+function allShips(){
+  var all=[player];
+  if(remotePlayer) all.push(remotePlayer);
+  return all.concat(bots);
+}
 
 var MAX_AMMO=3;
 var AMMO_REGEN_MS=3000; // one ammo every 3 seconds, up to MAX_AMMO
@@ -1148,6 +1257,18 @@ function makeShipEntity(def,x,y,isPlayer){
     ammo:MAX_AMMO, ammoRegenTimer:0, // limited-shot pool, regenerates over time
     abilityCharge:1, hitStreak:0 // ability starts charged; recharges via 3 landed hits
   };
+}
+
+// Host-only: builds the connected guest's ship entity from the ship they
+// picked and the upgrade levels *they* reported for it (their own save,
+// never this device's `progress`), so their earned upgrades carry over
+// into the shared battle correctly.
+function makeRemoteShipEntity(def,x,y,levels){
+  var ent=makeShipEntity(def,x,y,true);
+  ent.eff=effectiveStatsFromLevels(def, levels);
+  ent.hp=ent.maxHp=ent.eff.hp;
+  ent.guestLabel='FRIEND';
+  return ent;
 }
 
 // Bring a dead bot back to life at a random corner spawn point.
@@ -1200,6 +1321,10 @@ function spawnBurst(x,y,color,n){
     var a=Math.random()*Math.PI*2, sp=rnd(1,5);
     particles.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,decay:rnd(0.03,0.07),r:rnd(1.5,3.5),rgb:rgb});
   }
+  // Host-only: queue a lightweight effect descriptor so the connected
+  // guest -- who never runs local collision code -- can reproduce the
+  // same burst (and a matching hit sound) when the next snapshot arrives.
+  if(netRole==='host' && netConn) pendingFx.push({x:x,y:y,color:color,n:Math.min(n,10)});
 }
 
 /* =====================================================================
@@ -1227,6 +1352,13 @@ function updateGems(dt){
       sfxAbility();
       showAlert('GEM COLLECTED ('+gemsCollectedThisMatch+'/'+GEMS_TO_WIN+') -- CHEST: '+progress.bank, 2000);
       updateHUD();
+    } else if(remotePlayer && remotePlayer.alive && dst(remotePlayer.x,remotePlayer.y,g.x,g.y) < remotePlayer.r+g.r+6){
+      // Host-simulated guest ship picked up a gem -- the host's own chest
+      // is never touched; tell the guest so *their* own device credits it.
+      g.alive=false;
+      gems.splice(i,1);
+      spawnBurst(remotePlayer.x,remotePlayer.y,'#66eaff',14);
+      netSend({type:'gemPickup'});
     }
   }
 }
@@ -1249,27 +1381,40 @@ function drawGem(g){
 /* =====================================================================
    ABILITY TRIGGER
 ===================================================================== */
-function triggerAbility(){
-  if(!gameActive||!player.alive) return;
-  if(player.abilityCharge>0){
-    player.abilityCharge=0;
-    player.hitStreak=0;
-    player.abilityCd=player.def.ability.cooldown; // kept for the visual cooldown flash only
-    player.abilityActive=player.def.ability.duration;
-    sfxAbility();
-    if(player.def.id==='wraith'){
-      player.x += Math.cos(player.angle)*150;
-      player.y += Math.sin(player.angle)*150;
-      resolveObstacles(player);
-      spawnBurst(player.x,player.y,player.def.color,16);
-    } else if(player.def.id==='longshot'){
-      fireBullet(player, player.angle, true, false, true);
-    } else if(player.def.id==='swarmer'){
-      for(var i=0;i<12;i++) fireBullet(player, (Math.PI*2/12)*i, false, true, true);
-    } else if(player.def.id==='seraph'){
-      player.hp=Math.min(player.maxHp, player.hp + player.maxHp*0.45);
+// Shared ability-activation logic for any human-controlled ship (the
+// local player, or -- host-side -- a connected guest's ship).
+function triggerAbilityFor(ent){
+  if(!ent || !ent.alive) return;
+  if(ent.abilityCharge>0){
+    ent.abilityCharge=0;
+    ent.hitStreak=0;
+    ent.abilityCd=ent.def.ability.cooldown; // kept for the visual cooldown flash only
+    ent.abilityActive=ent.def.ability.duration;
+    if(ent===player) sfxAbility();
+    if(ent.def.id==='wraith'){
+      ent.x += Math.cos(ent.angle)*150;
+      ent.y += Math.sin(ent.angle)*150;
+      resolveObstacles(ent);
+      spawnBurst(ent.x,ent.y,ent.def.color,16);
+    } else if(ent.def.id==='longshot'){
+      fireBullet(ent, ent.angle, true, false, true);
+    } else if(ent.def.id==='swarmer'){
+      for(var i=0;i<12;i++) fireBullet(ent, (Math.PI*2/12)*i, false, true, true);
+    } else if(ent.def.id==='seraph'){
+      ent.hp=Math.min(ent.maxHp, ent.hp + ent.maxHp*0.45);
     }
   }
+}
+function triggerAbility(){
+  if(!gameActive) return;
+  if(netRole==='guest'){
+    // Guest never owns authoritative state -- ask the host to activate it,
+    // and play the sound locally now for instant feedback.
+    netSend({type:'ability'});
+    sfxAbility();
+    return;
+  }
+  triggerAbilityFor(player);
 }
 document.getElementById('abilityBtn').addEventListener('touchstart',function(e){ e.preventDefault(); triggerAbility(); },{passive:false});
 document.getElementById('abilityBtn').addEventListener('click',function(){ triggerAbility(); });
@@ -1328,9 +1473,296 @@ function bindBtn(id,k){
 }
 
 /* =====================================================================
+   MULTIPLAYER -- serverless WebRTC invite (PeerJS). One optional guest
+   joins a host's match, picks their own ship from the same hangar
+   carousel, and fights in the same free-for-all arena. Host-authoritative:
+   the host runs the whole simulation (including the guest's ship, driven
+   by the guest's input) and streams a compact state snapshot to the
+   guest at ~15Hz; the guest never simulates locally -- it renders
+   whatever snapshot last arrived and sends its own input back.
+===================================================================== */
+var netRole=null;             // null (solo) | 'host' | 'guest'
+var netPeer=null;             // PeerJS Peer instance
+var netConn=null;             // PeerJS DataConnection
+var pendingFx=[];             // host-only: burst events queued since the last snapshot
+var netSendTimer=0;
+var NET_TICK_MS=66;           // ~15Hz
+var guestChosenShip=null;     // host-only: ship def the connected guest picked
+var guestChosenLevels=null;   // host-only: guest's own upgrade levels for that ship
+var guestReadyToLaunch=false; // host-only: guest has chosen a ship and can be launched with
+var guestMatchEnded=false;    // guest-only: guard so matchEnd/death only end the guest's screen once
+var joinRoomId=null;          // guest-only: the ?join= room id from the URL, if any
+
+function shipDefById(id){
+  for(var i=0;i<SHIPS.length;i++) if(SHIPS[i].id===id) return SHIPS[i];
+  return null;
+}
+function netSend(obj){
+  if(netConn && netConn.open) netConn.send(obj);
+}
+
+/* ---------- HOST: create + manage the invite ---------- */
+function hostCreateInvite(){
+  var statusEl=document.getElementById('inviteStatus');
+  var linkRow=document.getElementById('inviteLinkRow');
+  linkRow.style.display='none';
+  document.getElementById('inviteLinkInput').value='';
+  statusEl.textContent='Connecting to matchmaking service...';
+
+  if(typeof Peer==='undefined'){
+    statusEl.textContent='Multiplayer needs an internet connection to set up (couldn\'t load the connection library).';
+    return;
+  }
+  try{ netPeer=new Peer(); }catch(e){
+    statusEl.textContent='Could not start an invite in this browser.';
+    return;
+  }
+
+  netPeer.on('open', function(id){
+    var link=location.origin+location.pathname+'?join='+id;
+    document.getElementById('inviteLinkInput').value=link;
+    linkRow.style.display='flex';
+    statusEl.textContent='Waiting for your friend to join...';
+  });
+
+  netPeer.on('connection', function(conn){
+    if(netConn && netConn.open){ conn.close(); return; } // one guest at a time
+    netConn=conn;
+    netRole='host';
+    guestChosenShip=null; guestChosenLevels=null; guestReadyToLaunch=false;
+    statusEl.textContent='PLAYER CONNECTED! Pick your ship below, then tap LAUNCH.';
+    conn.on('data', function(msg){ handleHostMessage(msg); });
+    conn.on('close', handleGuestDisconnected);
+  });
+
+  netPeer.on('error', function(){
+    statusEl.textContent='Connection error -- could not reach the matchmaking service. Check your connection and try again.';
+  });
+}
+function closeInviteModal(){
+  document.getElementById('inviteModalOverlay').classList.remove('show');
+}
+
+function handleHostMessage(msg){
+  if(!msg || !msg.type) return;
+  if(msg.type==='chooseShip'){
+    guestChosenShip=shipDefById(msg.shipId) || SHIPS[0];
+    guestChosenLevels=msg.levels || {speedLvl:0,damageLvl:0,shieldLvl:0};
+    guestReadyToLaunch=true;
+    var statusEl=document.getElementById('inviteStatus');
+    if(statusEl) statusEl.textContent='Your friend chose '+guestChosenShip.name+'. Pick your ship, then tap LAUNCH!';
+  } else if(msg.type==='input'){
+    lastGuestInput.turnLeft=!!msg.turnLeft;
+    lastGuestInput.turnRight=!!msg.turnRight;
+    lastGuestInput.thrustOn=!!msg.thrustOn;
+    lastGuestInput.fireOn=!!msg.fireOn;
+  } else if(msg.type==='ability'){
+    triggerAbilityFor(remotePlayer);
+  }
+}
+function handleGuestDisconnected(){
+  var statusEl=document.getElementById('inviteStatus');
+  if(gameActive){
+    if(remotePlayer) remotePlayer.alive=false;
+    showAlert('YOUR FRIEND DISCONNECTED', 2600);
+    if(statusEl) statusEl.textContent='Your friend disconnected.';
+    netConn=null;
+    guestReadyToLaunch=false;
+  } else {
+    // Not in a match yet -- tear down fully so re-opening the invite
+    // modal (or tapping INVITE FRIEND again) starts a clean new invite.
+    if(netConn){ try{ netConn.close(); }catch(e){} }
+    if(netPeer){ try{ netPeer.destroy(); }catch(e){} }
+    netConn=null; netPeer=null; netRole=null;
+    guestChosenShip=null; guestChosenLevels=null; guestReadyToLaunch=false;
+    if(statusEl) statusEl.textContent='Your friend disconnected before the match started. Tap INVITE FRIEND to try again.';
+    document.getElementById('inviteLinkRow').style.display='none';
+  }
+}
+
+/* ---------- HOST: per-tick state sync to the guest ---------- */
+function serializeShip(e){
+  return {
+    defId:e.def.id, x:e.x, y:e.y, angle:e.angle, hp:e.hp, maxHp:e.maxHp,
+    alive:e.alive, invincible:e.invincible, ammo:e.ammo,
+    abilityCharge:e.abilityCharge, hitStreak:e.hitStreak,
+    carryingGems:e.carryingGems, boosted:e.boosted
+  };
+}
+function hostNetworkTick(dt){
+  if(!netConn || !netConn.open) return;
+  netSendTimer+=dt;
+  if(netSendTimer<NET_TICK_MS) return;
+  netSendTimer=0;
+
+  var others=[serializeShip(player)];
+  for(var i=0;i<bots.length;i++) others.push(serializeShip(bots[i]));
+  var remaining=0;
+  for(var i=0;i<bots.length;i++) if(bots[i].alive) remaining++;
+
+  netSend({
+    type:'snapshot',
+    me: remotePlayer ? serializeShip(remotePlayer) : null,
+    others: others,
+    bullets: bullets.map(function(b){ return {x:b.x,y:b.y,vx:b.vx,vy:b.vy,color:b.color,size:b.size}; }),
+    gems: gems.map(function(g){ return {x:g.x,y:g.y}; }),
+    killCount: killCount,
+    remaining: remaining,
+    fx: pendingFx
+  });
+  pendingFx=[];
+}
+
+/* ---------- GUEST: join flow ---------- */
+function guestBeginConnect(){
+  var statusEl=document.getElementById('joinStatus');
+  if(typeof Peer==='undefined'){
+    statusEl.textContent='Could not load the connection library -- check your internet connection and reload.';
+    return;
+  }
+  netRole='guest';
+  statusEl.textContent='Connecting...';
+  try{ netPeer=new Peer(); }catch(e){
+    statusEl.textContent='Could not start a connection in this browser.';
+    return;
+  }
+  netPeer.on('open', function(){
+    netConn=netPeer.connect(joinRoomId, {reliable:true});
+    netConn.on('open', function(){
+      statusEl.textContent='Connected! Pick your ship below.';
+      document.getElementById('joinScreen').style.display='none';
+      showSelectScreen();
+    });
+    netConn.on('data', function(msg){ handleGuestMessage(msg); });
+    netConn.on('close', function(){
+      if(!guestMatchEnded){
+        guestMatchEnded=true;
+        if(gameActive) endGame(false, null, 'HOST DISCONNECTED', 'The host\'s connection was lost.');
+      }
+    });
+  });
+  netPeer.on('error', function(){
+    statusEl.textContent='Could not reach that game -- the invite link may be expired, or the host has closed it.';
+  });
+}
+
+function handleGuestMessage(msg){
+  if(!msg || !msg.type) return;
+  if(msg.type==='matchStart'){
+    startGuestMatch(msg);
+  } else if(msg.type==='snapshot'){
+    applyGuestSnapshot(msg);
+  } else if(msg.type==='gemPickup'){
+    gemsCollectedThisMatch++;
+    progress.bank++;
+    saveProgress();
+    spawnBurstLocalOnly(player.x,player.y,'#66eaff',14);
+    sfxAbility();
+    showAlert('GEM COLLECTED -- CHEST: '+progress.bank, 2000);
+  } else if(msg.type==='matchEnd'){
+    if(!guestMatchEnded){
+      guestMatchEnded=true;
+      if(player && player.alive && msg.reason==='cleared'){
+        endGame(true);
+      } else if(player && player.alive){
+        endGame(true, null, 'BATTLE OVER', 'The host\'s battle has ended -- you survived until the end!');
+      }
+      // if the guest's own ship already died, applyGuestSnapshot already
+      // called endGame(false) for them -- nothing further to do here.
+    }
+  }
+}
+
+// Guest-only: lightweight stand-ins for bots[] built fresh from each
+// snapshot, purely for drawing/minimap -- never touched by AI or physics.
+function shipFromSnapshot(s){
+  return {
+    def: shipDefById(s.defId) || SHIPS[0], x:s.x, y:s.y, angle:s.angle,
+    hp:s.hp, maxHp:s.maxHp, r:16, alive:s.alive, invincible:s.invincible||0,
+    ammo:s.ammo, abilityCharge:s.abilityCharge, carryingGems:s.carryingGems||0,
+    boosted:s.boosted||0, isPlayer:false, trail:[], vx:0, vy:0
+  };
+}
+function startGuestMatch(msg){
+  document.getElementById('joinScreen').style.display='none';
+  obstacles=msg.obstacles;
+  shieldStation.x=msg.shieldStation.x; shieldStation.y=msg.shieldStation.y; shieldStation.pulse=0;
+  guestMatchEnded=false;
+  gemsCollectedThisMatch=0;
+  killCount=0;
+  bullets=[]; particles=[]; gems=[]; bots=[];
+
+  player=makeShipEntity(selectedShip, WW/2, WH/2, true);
+  player.eff=effectiveStatsFromLevels(selectedShip, getShipProgress(selectedShip.id));
+  player.hp=player.maxHp=player.eff.hp;
+
+  document.getElementById('shipNameVal').textContent=selectedShip.name;
+  document.getElementById('shipNameVal').style.color=selectedShip.color;
+  document.getElementById('abilityIcon').textContent=selectedShip.ability.icon;
+
+  document.getElementById('hud').style.display='flex';
+  document.getElementById('minimap').style.display='block';
+  document.getElementById('abilityBtn').style.display='flex';
+  document.getElementById('abilityLbl').style.display='block';
+  document.getElementById('gameOverScreen').classList.add('hidden');
+  positionAbilityUI();
+
+  CAM.x=player.x; CAM.y=player.y; CAM.zoom=0.62; targetZoom=0.62; manualZoom=0.62;
+  updateHUD();
+  gameActive=true;
+  lastTime=performance.now();
+}
+function applyGuestSnapshot(msg){
+  if(!gameActive || !msg.me) return;
+  var wasAlive=player.alive;
+  player.x=msg.me.x; player.y=msg.me.y; player.angle=msg.me.angle;
+  player.hp=msg.me.hp; player.maxHp=msg.me.maxHp; player.alive=msg.me.alive;
+  player.ammo=msg.me.ammo; player.abilityCharge=msg.me.abilityCharge;
+  player.hitStreak=msg.me.hitStreak||0;
+  player.boosted=msg.me.boosted||0;
+  player.trail.push({x:player.x,y:player.y});
+  if(player.trail.length>20) player.trail.shift();
+
+  var newBots=[];
+  for(var i=0;i<msg.others.length;i++) newBots.push(shipFromSnapshot(msg.others[i]));
+  bots=newBots;
+
+  bullets=msg.bullets;
+  gems=msg.gems.map(function(g){ return {x:g.x,y:g.y,r:10,pulse:performance.now()*0.004,alive:true}; });
+  killCount=msg.killCount;
+
+  updateHUD();
+  document.getElementById('remainVal').textContent=msg.remaining;
+
+  if(msg.fx){
+    for(var f=0;f<msg.fx.length;f++){
+      spawnBurstLocalOnly(msg.fx[f].x, msg.fx[f].y, msg.fx[f].color, msg.fx[f].n);
+      sfxHit();
+    }
+  }
+
+  if(wasAlive && !player.alive && !guestMatchEnded){
+    guestMatchEnded=true;
+    endGame(false);
+  }
+}
+// Guest-only particle spawn for host-reported fx events -- identical to
+// spawnBurst's particle half, but never re-queues into pendingFx (that's
+// a host-only concept, and the guest has no connection to send it over).
+function spawnBurstLocalOnly(x,y,color,n){
+  var rgb=hexRGB(color);
+  for(var i=0;i<n;i++){
+    var a=Math.random()*Math.PI*2, sp=rnd(1,5);
+    particles.push({x:x,y:y,vx:Math.cos(a)*sp,vy:Math.sin(a)*sp,life:1,decay:rnd(0.03,0.07),r:rnd(1.5,3.5),rgb:rgb});
+  }
+}
+
+/* =====================================================================
    GAME START / END
 ===================================================================== */
 function startGame(){
+  var hasGuest = netRole==='host' && netConn && netConn.open && guestReadyToLaunch;
+
   genObstacles();
   placeShieldStation();
   player=makeShipEntity(selectedShip, WW/2, WH/2, true);
@@ -1338,17 +1770,28 @@ function startGame(){
   player.invincible=1500;
   bots=[]; bullets=[]; particles=[]; gems=[]; killCount=0;
   gemsCollectedThisMatch=0;
+  remotePlayer=null;
+  lastGuestInput={turnLeft:false, turnRight:false, thrustOn:false, fireOn:false};
 
   document.getElementById('shipNameVal').textContent=selectedShip.name;
   document.getElementById('shipNameVal').style.color=selectedShip.color;
   document.getElementById('abilityIcon').textContent=selectedShip.ability.icon;
 
-  for(var i=0;i<TOTAL_BOTS;i++){
+  var botSlots = hasGuest ? TOTAL_BOTS-1 : TOTAL_BOTS;
+  for(var i=0;i<botSlots;i++){
     var botDef=SHIPS[rndI(0,SHIPS.length-1)];
     var sp=randomSpawnPoint();
     var b=makeShipEntity(botDef, sp.x, sp.y, false);
     b.hp *= 0.85; b.maxHp=b.hp;
     bots.push(b);
+  }
+
+  if(hasGuest){
+    var gsp=randomSpawnPoint();
+    remotePlayer=makeRemoteShipEntity(guestChosenShip, gsp.x, gsp.y, guestChosenLevels);
+    remotePlayer.angle=rnd(0,Math.PI*2);
+    remotePlayer.invincible=1500;
+    netSend({type:'matchStart', obstacles:obstacles, shieldStation:{x:shieldStation.x,y:shieldStation.y}});
   }
 
   document.getElementById('hud').style.display='flex';
@@ -1391,7 +1834,12 @@ function positionAbilityUI(){
   window.addEventListener('resize',place);
 }
 
-function endGame(won){
+// `reason` ('cleared'|'gems'|null) is host-only bookkeeping used to tell a
+// connected guest why the match ended. `customTitle`/`customSub` let the
+// guest show a neutral "the host's battle ended, you survived" screen
+// instead of a personal victory/defeat verdict that wouldn't be accurate
+// for them.
+function endGame(won, reason, customTitle, customSub){
   gameActive=false;
   document.getElementById('hud').style.display='none';
   document.getElementById('minimap').style.display='none';
@@ -1399,7 +1847,10 @@ function endGame(won){
   document.getElementById('abilityLbl').style.display='none';
   var t=document.getElementById('goTitle');
   var s=document.getElementById('goSub');
-  if(won){
+  if(customTitle){
+    t.textContent=customTitle; t.style.color='#66eaff';
+    s.textContent=customSub||'';
+  } else if(won){
     t.textContent='VICTORY'; t.style.color='#44ff88';
     if(gemsCollectedThisMatch>=GEMS_TO_WIN){
       s.textContent=gemsCollectedThisMatch+' gems collected -- '+killCount+' bots downed';
@@ -1411,11 +1862,22 @@ function endGame(won){
     s.textContent=killCount+' bots downed, '+gemsCollectedThisMatch+' gems collected before you fell';
   }
   document.getElementById('gameOverScreen').classList.remove('hidden');
+
+  if(netRole==='host'){
+    netSend({type:'matchEnd', reason:reason||(won?'gems':'hostDied')});
+  }
 }
 document.getElementById('restartBtn').addEventListener('click',function(){
   document.getElementById('gameOverScreen').classList.add('hidden');
-  document.getElementById('selectScreen').style.display='flex';
-  updateDetail();
+  // One battle per invite: leaving the post-match screen ends the
+  // multiplayer session cleanly and returns everyone to a solo hangar.
+  if(netConn){ try{ netConn.close(); }catch(e){} netConn=null; }
+  if(netPeer){ try{ netPeer.destroy(); }catch(e){} netPeer=null; }
+  netRole=null; remotePlayer=null; guestChosenShip=null; guestChosenLevels=null; guestReadyToLaunch=false;
+  joinRoomId=null;
+  document.getElementById('inviteStatus').textContent='';
+  document.getElementById('inviteLinkRow').style.display='none';
+  showSelectScreen();
 });
 
 function updateHUD(){
@@ -1467,9 +1929,24 @@ function findNearestUnclaimedGem(b){
   return best;
 }
 
+// Whichever human ship (the local player, or -- host-side -- a connected
+// guest) is nearest to this bot. Bots treat both as equally real threats,
+// so a guest's ship draws AI attention just like the local player does.
+function nearestThreatHuman(b){
+  var best=null, bestD=Infinity;
+  if(player.alive){ bestD=dst(b.x,b.y,player.x,player.y); best=player; }
+  if(remotePlayer && remotePlayer.alive){
+    var d2=dst(b.x,b.y,remotePlayer.x,remotePlayer.y);
+    if(d2<bestD){ bestD=d2; best=remotePlayer; }
+  }
+  return {ent:best, dist:bestD};
+}
+
 function updateBotAI(b, dt){
   b.aiDecisionTimer -= dt;
-  var distToPlayer = player.alive ? dst(b.x,b.y,player.x,player.y) : Infinity;
+  var threat=nearestThreatHuman(b);
+  var threatEnt=threat.ent;
+  var distToPlayer=threat.dist;
 
   /* ---- Decide role for this frame ----
      - carrying a gem: always steal-flee (protect the loot, run from player)
@@ -1499,8 +1976,8 @@ function updateBotAI(b, dt){
     // Run away from the player, using obstacles as breaks in line of sight.
     // Face away from the player (keeps guns pointed roughly at pursuer while
     // backing off feels more natural, so face the player but thrust away).
-    var awayAngle = player.alive ? angTo(player.x,player.y,b.x,b.y) : b.angle;
-    var faceAngle = player.alive ? angTo(b.x,b.y,player.x,player.y) : b.angle;
+    var awayAngle = threatEnt ? angTo(threatEnt.x,threatEnt.y,b.x,b.y) : b.angle;
+    var faceAngle = threatEnt ? angTo(b.x,b.y,threatEnt.x,threatEnt.y) : b.angle;
     var da=angDiff(b.angle, faceAngle);
     b.angle += da*0.10;
 
@@ -1514,7 +1991,7 @@ function updateBotAI(b, dt){
 
     // A fleeing bot with no gem may still take a defensive shot if cornered
     b.cooldown -= dt;
-    if(b.aiState==='flee' && b.cooldown<=0 && distToPlayer<DANGER_RANGE && player.alive && b.ammo>0){
+    if(b.aiState==='flee' && b.cooldown<=0 && distToPlayer<DANGER_RANGE && threatEnt && b.ammo>0){
       fireBullet(b, faceAngle);
       b.ammo--;
       b.cooldown = b.def.fireRate*1.8;
@@ -1549,9 +2026,8 @@ function updateBotAI(b, dt){
     return;
   }
 
-  // No gems on the field -- fall back to skirmishing with the player
-  var target=null, bestD=Infinity;
-  if(player.alive){ target=player; bestD=distToPlayer; }
+  // No gems on the field -- fall back to skirmishing with the nearest human
+  var target=threatEnt, bestD=distToPlayer;
   for(var i=0;i<bots.length;i++){
     var other=bots[i];
     if(other===b||!other.alive) continue;
@@ -1621,61 +2097,80 @@ function updateBotAI(b, dt){
 /* =====================================================================
    PLAYER UPDATE (rotate + thrust control scheme)
 ===================================================================== */
-function updatePlayer(dt){
-  if(!player.alive) return;
-  if(player.invincible>0) player.invincible -= dt;
-  if(player.cooldown>0) player.cooldown -= dt;
-  if(player.abilityCd>0) player.abilityCd -= dt;
-  if(player.abilityActive>0){
-    player.abilityActive -= dt;
-    if(player.def.id==='vanguard') player.boosted=player.abilityActive;
+// Shared rotate/thrust/fire logic for any human-controlled ship (the local
+// player, or -- on the host -- a connected guest's ship driven by their
+// latest received input packet instead of local keys/btn). `input` is a
+// plain {turnLeft, turnRight, thrustOn, fireOn} object.
+function updateControlledShip(ent, input, dt){
+  if(!ent.alive) return;
+  if(ent.invincible>0) ent.invincible -= dt;
+  if(ent.cooldown>0) ent.cooldown -= dt;
+  if(ent.abilityCd>0) ent.abilityCd -= dt;
+  if(ent.abilityActive>0){
+    ent.abilityActive -= dt;
+    if(ent.def.id==='vanguard') ent.boosted=ent.abilityActive;
   }
 
-  var turnLeft = keys['ArrowLeft']||keys['KeyA']||btn.left;
-  var turnRight = keys['ArrowRight']||keys['KeyD']||btn.right;
-  var thrustOn = keys['ArrowUp']||keys['KeyW']||btn.thrust;
-  var fireOn = keys['Space']||btn.fire;
+  var turnRate=ent.def.turnRate;
+  if(input.turnLeft) ent.angle -= turnRate*(dt/16.67);
+  if(input.turnRight) ent.angle += turnRate*(dt/16.67);
 
-  var turnRate=player.def.turnRate;
-  if(turnLeft) player.angle -= turnRate*(dt/16.67);
-  if(turnRight) player.angle += turnRate*(dt/16.67);
+  var boostMul = (ent.def.id==='vanguard'&&ent.boosted>0) ? 1.7 : 1.0;
+  var effThrust = ent.eff ? ent.eff.thrustPower : ent.def.thrustPower;
+  var effMaxSpeed = ent.eff ? ent.eff.maxSpeed : ent.def.maxSpeed;
 
-  var boostMul = (player.def.id==='vanguard'&&player.boosted>0) ? 1.7 : 1.0;
-  var effThrust = player.eff ? player.eff.thrustPower : player.def.thrustPower;
-  var effMaxSpeed = player.eff ? player.eff.maxSpeed : player.def.maxSpeed;
-
-  if(thrustOn){
-    player.vx += Math.cos(player.angle)*effThrust*boostMul*(dt/16.67);
-    player.vy += Math.sin(player.angle)*effThrust*boostMul*(dt/16.67);
-    player.idleTimer=0;
-    var now=performance.now();
-    if(now-lastThrustSfx>220){ sfxThrust(); lastThrustSfx=now; }
+  if(input.thrustOn){
+    ent.vx += Math.cos(ent.angle)*effThrust*boostMul*(dt/16.67);
+    ent.vy += Math.sin(ent.angle)*effThrust*boostMul*(dt/16.67);
+    ent.idleTimer=0;
+    if(ent.isPlayer && ent===player){
+      var now=performance.now();
+      if(now-lastThrustSfx>220){ sfxThrust(); lastThrustSfx=now; }
+    }
   }
-  player.vx *= player.def.drag; player.vy *= player.def.drag;
-  var sp=Math.sqrt(player.vx*player.vx+player.vy*player.vy);
+  ent.vx *= ent.def.drag; ent.vy *= ent.def.drag;
+  var sp=Math.sqrt(ent.vx*ent.vx+ent.vy*ent.vy);
   var maxSp=effMaxSpeed*boostMul;
-  if(sp>maxSp){ player.vx=player.vx/sp*maxSp; player.vy=player.vy/sp*maxSp; }
+  if(sp>maxSp){ ent.vx=ent.vx/sp*maxSp; ent.vy=ent.vy/sp*maxSp; }
 
-  player.x += player.vx*(dt/16.67);
-  player.y += player.vy*(dt/16.67);
-  resolveObstacles(player);
+  ent.x += ent.vx*(dt/16.67);
+  ent.y += ent.vy*(dt/16.67);
+  resolveObstacles(ent);
 
-  player.trail.push({x:player.x,y:player.y});
-  if(player.trail.length>20) player.trail.shift();
+  ent.trail.push({x:ent.x,y:ent.y});
+  if(ent.trail.length>20) ent.trail.shift();
 
-  var rate=player.def.fireRate * (boostMul<1.7?1:0.6);
-  if(fireOn && player.cooldown<=0 && player.ammo>0){
-    var shots=player.def.bulletsPerShot||1;
+  var rate=ent.def.fireRate * (boostMul<1.7?1:0.6);
+  if(input.fireOn && ent.cooldown<=0 && ent.ammo>0){
+    var shots=ent.def.bulletsPerShot||1;
     for(var i=0;i<shots;i++){
       var off = shots>1 ? (i-(shots-1)/2)*0.18 : 0;
-      var spread=(player.def.spread ? (Math.random()-0.5)*player.def.spread*0.4 : 0);
-      fireBullet(player, player.angle+off+spread);
+      var spread=(ent.def.spread ? (Math.random()-0.5)*ent.def.spread*0.4 : 0);
+      fireBullet(ent, ent.angle+off+spread);
     }
-    player.ammo--;
-    player.cooldown=rate;
-    player.idleTimer=0;
-    sfxFire();
+    ent.ammo--;
+    ent.cooldown=rate;
+    ent.idleTimer=0;
+    if(ent===player) sfxFire();
   }
+}
+
+function updatePlayer(dt){
+  if(!player.alive) return;
+  var input={
+    turnLeft: keys['ArrowLeft']||keys['KeyA']||btn.left,
+    turnRight: keys['ArrowRight']||keys['KeyD']||btn.right,
+    thrustOn: keys['ArrowUp']||keys['KeyW']||btn.thrust,
+    fireOn: keys['Space']||btn.fire
+  };
+  updateControlledShip(player, input, dt);
+}
+
+// Host-only: drives the connected guest's ship using their most recently
+// received input packet instead of local keys/btn.
+function updateRemoteGuestShip(dt){
+  if(!remotePlayer || !remotePlayer.alive) return;
+  updateControlledShip(remotePlayer, lastGuestInput, dt);
 }
 
 /* =====================================================================
@@ -1696,6 +2191,7 @@ function updateBullets(dt){
     if(!removed){
       var targets=[];
       if(player.alive && player!==bl.owner) targets.push(player);
+      if(remotePlayer && remotePlayer.alive && remotePlayer!==bl.owner) targets.push(remotePlayer);
       for(var t=0;t<bots.length;t++){ if(bots[t].alive && bots[t]!==bl.owner) targets.push(bots[t]); }
 
       for(var ti=0;ti<targets.length;ti++){
@@ -1719,7 +2215,7 @@ function updateBullets(dt){
               if(shooter.hitStreak>=HITS_TO_RECHARGE_ABILITY){
                 shooter.hitStreak=0;
                 shooter.abilityCharge=1;
-                if(shooter.isPlayer){ showAlert('ABILITY RECHARGED', 1800); }
+                if(shooter===player){ showAlert('ABILITY RECHARGED', 1800); }
               }
             }
           }
@@ -1728,7 +2224,7 @@ function updateBullets(dt){
             tgt.alive=false;
             spawnBurst(tgt.x,tgt.y,tgt.def.color,28);
             sfxShipExplosion();
-            if(!tgt.isPlayer && bl.owner===player){
+            if(!tgt.isPlayer && (bl.owner===player || bl.owner===remotePlayer)){
               killCount++;
               spawnGem(tgt.x, tgt.y);
               // Drop any gems this bot had stolen, in addition to its own kill-gem
@@ -1777,12 +2273,40 @@ function updateCamera(dt){
 /* =====================================================================
    MAIN UPDATE
 ===================================================================== */
+// Guest-only: no local physics or AI at all -- the host is authoritative.
+// Just track the camera on the last snapshot position, animate local-only
+// particles, and stream this device's input to the host.
+function guestClientTick(dt){
+  if(alertTimer>0){ alertTimer-=dt; if(alertTimer<=0) document.getElementById('alertBar').classList.remove('show'); }
+  updateParticles(dt);
+  updateCamera(dt);
+  guestNetworkTick(dt);
+}
+function guestNetworkTick(dt){
+  if(!netConn || !netConn.open) return;
+  netSendTimer+=dt;
+  if(netSendTimer<NET_TICK_MS) return;
+  netSendTimer=0;
+  netSend({
+    type:'input',
+    turnLeft: keys['ArrowLeft']||keys['KeyA']||btn.left,
+    turnRight: keys['ArrowRight']||keys['KeyD']||btn.right,
+    thrustOn: keys['ArrowUp']||keys['KeyW']||btn.thrust,
+    fireOn: keys['Space']||btn.fire
+  });
+}
+
 function update(dt){
   if(!gameActive) return;
+  if(netRole==='guest'){ guestClientTick(dt); return; }
   if(alertTimer>0){ alertTimer-=dt; if(alertTimer<=0) document.getElementById('alertBar').classList.remove('show'); }
 
   updateAmmoRegen(player, dt);
   updatePlayer(dt);
+  if(remotePlayer){
+    updateAmmoRegen(remotePlayer, dt);
+    updateRemoteGuestShip(dt);
+  }
   for(var i=0;i<bots.length;i++){ if(bots[i].alive) updateBotAI(bots[i],dt); }
   for(var i=0;i<bots.length;i++){
     var b=bots[i];
@@ -1816,7 +2340,10 @@ function update(dt){
   var botsAlive=0;
   for(var i=0;i<bots.length;i++) if(bots[i].alive) botsAlive++;
   if(!player.alive){ endGame(false); }
-  else if(botsAlive===0 || gemsCollectedThisMatch>=GEMS_TO_WIN){ endGame(true); }
+  else if(botsAlive===0){ endGame(true,'cleared'); }
+  else if(gemsCollectedThisMatch>=GEMS_TO_WIN){ endGame(true,'gems'); }
+
+  if(netRole==='host') hostNetworkTick(dt);
 }
 
 /* =====================================================================
@@ -1850,7 +2377,7 @@ function drawShipShape(e){
   ctx.fillStyle='rgba(0,10,20,0.85)';
   ctx.lineWidth=2;
 
-  var thrusting = e.isPlayer ? (keys['ArrowUp']||keys['KeyW']||btn.thrust) : (Math.sqrt(e.vx*e.vx+e.vy*e.vy)>0.5);
+  var thrusting = e===player ? (keys['ArrowUp']||keys['KeyW']||btn.thrust) : (Math.sqrt(e.vx*e.vx+e.vy*e.vy)>0.5);
   if(thrusting){
     var fl=9+Math.random()*7;
     // small flickering flame cone out the back, independent of hull color
@@ -1902,11 +2429,11 @@ function drawShipShape(e){
 
   drawShieldRing(e.x,e.y,e.hp,e.maxHp);
 
-  if(!e.isPlayer){
+  if(e!==player){
     ctx.save();
     ctx.font='bold 10px Orbitron,monospace'; ctx.textAlign='center';
     ctx.fillStyle=col;
-    ctx.fillText(e.def.name, e.x, e.y-34);
+    ctx.fillText(e===remotePlayer ? (e.guestLabel||'FRIEND') : e.def.name, e.x, e.y-34);
     if(e.carryingGems>0){
       ctx.fillStyle='#66eaff';
       ctx.font='bold 9px Orbitron,monospace';
@@ -1986,6 +2513,7 @@ function drawWorld(){
   ctx.shadowBlur=0;
 
   for(var i=0;i<bots.length;i++){ if(bots[i].alive) drawShipShape(bots[i]); }
+  if(remotePlayer && remotePlayer.alive) drawShipShape(remotePlayer);
   if(player.alive) drawShipShape(player);
 
   ctx.restore();
@@ -2010,6 +2538,10 @@ function drawMinimap(){
     var b=bots[i]; if(!b.alive) continue;
     mx.fillStyle=b.def.color;
     mx.beginPath(); mx.arc(b.x*scaleX,b.y*scaleY,2.5,0,Math.PI*2); mx.fill();
+  }
+  if(remotePlayer && remotePlayer.alive){
+    mx.fillStyle=remotePlayer.def.color;
+    mx.beginPath(); mx.arc(remotePlayer.x*scaleX,remotePlayer.y*scaleY,3,0,Math.PI*2); mx.fill();
   }
   if(player.alive){
     mx.fillStyle='rgba(0,212,255,1)';
@@ -2043,6 +2575,10 @@ function loop(now){
    INIT
 ===================================================================== */
 var isTouchDev=('ontouchstart' in window)||navigator.maxTouchPoints>0;
+(function(){
+  var m=location.search.match(/[?&]join=([^&]+)/);
+  if(m) joinRoomId=decodeURIComponent(m[1]);
+})();
 resize();
 if(isTouchDev){
   document.getElementById('touchControls').style.display='block';
