@@ -89,13 +89,23 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 .shipCard canvas{width:100%;height:64px;}
 .shipCardName{font-weight:800;letter-spacing:1.5px;font-size:12px;margin-top:4px;}
 .shipCardRole{font-size:9px;color:rgba(150,180,220,0.6);margin-top:2px;letter-spacing:1px;text-transform:uppercase;}
+.shipCardUpgradeBtn{margin-top:7px;width:100%;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.4);border-radius:5px;color:#66eaff;font-family:inherit;font-size:8px;letter-spacing:1.5px;padding:6px 4px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
 #shipDetail{margin-top:14px;width:100%;max-width:520px;border:1px solid rgba(0,212,255,0.2);border-left:3px solid #00d4ff;background:rgba(10,20,35,0.8);border-radius:8px;padding:12px 14px;font-size:11.5px;color:rgba(200,220,240,0.85);line-height:1.5;min-height:50px;}
-#gemBankRow{font-size:12px;letter-spacing:2px;color:#66eaff;text-shadow:0 0 10px rgba(102,234,255,0.55);margin-bottom:14px;display:flex;align-items:center;gap:6px;}
-#gemBankRow .gicon{font-size:14px;}
-#shipStatsBlock{margin-top:10px;}
-.statRow{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:10.5px;}
+#gemBankRow{font-size:10px;letter-spacing:2px;color:#66eaff;text-shadow:0 0 8px rgba(102,234,255,0.5);margin-bottom:12px;display:flex;align-items:center;gap:5px;}
+#gemBankRow .gicon{font-size:12px;}
+
+/* Ship upgrade popup */
+#upgradeModalOverlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.65);z-index:95;display:none;align-items:center;justify-content:center;padding:16px;}
+#upgradeModalOverlay.show{display:flex;}
+#upgradeModalCard{background:rgba(0,10,24,0.98);border:1px solid rgba(0,212,255,0.3);border-radius:14px;padding:22px 22px 20px;max-width:360px;width:100%;position:relative;}
+#upgradeModalCard h2{font-size:14px;letter-spacing:2px;margin-bottom:2px;text-align:center;}
+#upgradeModalRole{text-align:center;font-size:9px;color:rgba(150,180,220,0.6);letter-spacing:1px;text-transform:uppercase;margin-bottom:12px;}
+#closeUpgradeModal{position:absolute;top:13px;right:15px;background:transparent;border:none;color:rgba(0,212,255,0.55);font-size:19px;cursor:pointer;line-height:1;-webkit-tap-highlight-color:transparent;}
+#upgradeModalGemRow{text-align:center;font-size:11px;letter-spacing:2px;color:#66eaff;text-shadow:0 0 10px rgba(102,234,255,0.5);margin-bottom:14px;}
+#upgradeModalStats{margin-bottom:14px;}
+.statRow{display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:10.5px;color:rgba(200,220,240,0.85);}
 .statRow span:last-child{color:#66eaff;}
-#upgradeBlock{margin-top:12px;display:flex;flex-direction:column;gap:6px;}
+#upgradeModalButtons{display:flex;flex-direction:column;gap:8px;}
 .upgradeBtn{display:flex;justify-content:space-between;align-items:center;width:100%;background:rgba(0,212,255,0.07);border:1px solid rgba(0,212,255,0.35);border-radius:6px;color:#66eaff;font-family:inherit;font-size:10px;letter-spacing:1px;padding:9px 11px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
 .upgradeBtn:disabled{opacity:0.35;cursor:default;}
 .upgradeBtn .lvl{color:rgba(200,220,240,0.5);font-size:9px;margin-left:5px;}
@@ -204,12 +214,19 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
   <div id="selectSub">Choose your ranger -- Arena Protocol</div>
   <div id="gemBankRow"><span class="gicon">&#9670;</span>HANGAR CHEST: <span id="gemBankVal">0</span> GEMS</div>
   <div id="roster"></div>
-  <div id="shipDetail">
-    <div id="shipDetailInfo">Select a ranger to view dossier.</div>
-    <div id="shipStatsBlock"></div>
-    <div id="upgradeBlock"></div>
-  </div>
+  <div id="shipDetail">Select a ranger to view dossier.</div>
   <button id="launchBtn">LAUNCH</button>
+</div>
+
+<div id="upgradeModalOverlay">
+  <div id="upgradeModalCard">
+    <button id="closeUpgradeModal">X</button>
+    <h2 id="upgradeModalName">SHIP</h2>
+    <div id="upgradeModalRole">Role</div>
+    <div id="upgradeModalGemRow">CHEST: <span id="upgradeModalGemVal">0</span> GEMS</div>
+    <div id="upgradeModalStats"></div>
+    <div id="upgradeModalButtons"></div>
+  </div>
 </div>
 
 <div class="screen hidden" id="gameOverScreen">
@@ -933,6 +950,15 @@ function buildRoster(){
       roleEl.className='shipCardRole'; roleEl.textContent=ship.role;
       card.appendChild(roleEl);
 
+      var upgradeBtn=document.createElement('button');
+      upgradeBtn.className='shipCardUpgradeBtn';
+      upgradeBtn.textContent='UPGRADE';
+      upgradeBtn.addEventListener('click',function(e){
+        e.stopPropagation();
+        openUpgradeModal(ship);
+      });
+      card.appendChild(upgradeBtn);
+
       card.addEventListener('click',function(){
         selectedShip=ship;
         var allCards=document.querySelectorAll('.shipCard');
@@ -948,24 +974,10 @@ function buildRoster(){
 function updateDetail(){
   var d=document.getElementById('shipDetail');
   d.style.borderLeftColor=selectedShip.color;
-
-  var info=document.getElementById('shipDetailInfo');
-  info.innerHTML='<b style="color:'+selectedShip.color+';">'+selectedShip.name+'</b> -- '+selectedShip.role+'<br>'+selectedShip.desc+'<br><br><b style="color:'+selectedShip.color+';">'+selectedShip.ability.name+':</b> '+selectedShip.ability.desc;
-
-  var p=getShipProgress(selectedShip.id);
-  var eff=getEffectiveStats(selectedShip);
-  var statsBlock=document.getElementById('shipStatsBlock');
-  statsBlock.innerHTML=
-    '<div class="statRow"><span>HULL (HP)</span><span>'+eff.hp+'</span></div>'+
-    '<div class="statRow"><span>SPEED</span><span>Lv.'+p.speedLvl+' (+'+(p.speedLvl*10)+'%)</span></div>'+
-    '<div class="statRow"><span>DAMAGE</span><span>Lv.'+p.damageLvl+' (+'+(p.damageLvl*10)+'%)</span></div>'+
-    '<div class="statRow"><span>SHIELD</span><span>Lv.'+p.shieldLvl+' (+'+(p.shieldLvl*10)+'%)</span></div>';
-
-  buildUpgradeButtons();
-  updateGemBankDisplay();
-
+  d.innerHTML='<b style="color:'+selectedShip.color+';">'+selectedShip.name+'</b> -- '+selectedShip.role+'<br>'+selectedShip.desc+'<br><br><b style="color:'+selectedShip.color+';">'+selectedShip.ability.name+':</b> '+selectedShip.ability.desc;
   document.getElementById('launchBtn').style.borderColor=selectedShip.color;
   document.getElementById('launchBtn').style.color=selectedShip.color;
+  updateGemBankDisplay();
 }
 
 function updateGemBankDisplay(){
@@ -973,19 +985,46 @@ function updateGemBankDisplay(){
   if(el) el.textContent=progress.bank;
 }
 
-// Builds the three "spend gems on this ship" buttons for whichever ship
-// is currently selected in the hangar. Re-run after every purchase so
-// levels, costs and affordability all stay in sync with progress/bank.
+/* =====================================================================
+   SHIP UPGRADE POPUP -- opened via the UPGRADE button on a hangar card.
+   Shows that ship's current stats and lets the player spend chest gems
+   on it, independently of which ship is selected for launch.
+===================================================================== */
+var upgradeModalShip=null;
 var UPGRADE_DEFS=[
   {stat:'speedLvl', label:'SPEED'},
   {stat:'damageLvl', label:'DAMAGE'},
   {stat:'shieldLvl', label:'SHIELD'}
 ];
-function buildUpgradeButtons(){
-  var wrap=document.getElementById('upgradeBlock');
+function openUpgradeModal(ship){
+  upgradeModalShip=ship;
+  document.getElementById('upgradeModalName').textContent=ship.name;
+  document.getElementById('upgradeModalName').style.color=ship.color;
+  document.getElementById('upgradeModalRole').textContent=ship.role;
+  document.getElementById('upgradeModalOverlay').classList.add('show');
+  refreshUpgradeModal();
+}
+function closeUpgradeModal(){
+  document.getElementById('upgradeModalOverlay').classList.remove('show');
+  upgradeModalShip=null;
+}
+function refreshUpgradeModal(){
+  if(!upgradeModalShip) return;
+  var ship=upgradeModalShip;
+  var p=getShipProgress(ship.id);
+  var eff=getEffectiveStats(ship);
+
+  document.getElementById('upgradeModalGemVal').textContent=progress.bank;
+
+  var statsBlock=document.getElementById('upgradeModalStats');
+  statsBlock.innerHTML=
+    '<div class="statRow"><span>HULL (HP)</span><span>'+eff.hp+'</span></div>'+
+    '<div class="statRow"><span>SPEED</span><span>Lv.'+p.speedLvl+' (+'+(p.speedLvl*10)+'%)</span></div>'+
+    '<div class="statRow"><span>DAMAGE</span><span>Lv.'+p.damageLvl+' (+'+(p.damageLvl*10)+'%)</span></div>'+
+    '<div class="statRow"><span>SHIELD</span><span>Lv.'+p.shieldLvl+' (+'+(p.shieldLvl*10)+'%)</span></div>';
+
+  var wrap=document.getElementById('upgradeModalButtons');
   wrap.innerHTML='';
-  var p=getShipProgress(selectedShip.id);
-  var ship=selectedShip;
   for(var i=0;i<UPGRADE_DEFS.length;i++){
     (function(entry){
       var btn=document.createElement('button');
@@ -995,13 +1034,16 @@ function buildUpgradeButtons(){
       btn.addEventListener('click', function(){
         if(purchaseUpgrade(ship.id, entry.stat)){
           showAlert(ship.name+' '+entry.label+' UPGRADED! (+10%)', 2400);
-          updateDetail();
+          refreshUpgradeModal();
+          updateGemBankDisplay();
         }
       });
       wrap.appendChild(btn);
     })(UPGRADE_DEFS[i]);
   }
 }
+document.getElementById('closeUpgradeModal').addEventListener('click', closeUpgradeModal);
+document.getElementById('upgradeModalOverlay').addEventListener('click',function(e){ if(e.target===this) closeUpgradeModal(); });
 
 var cardT=0;
 function animateCards(){
