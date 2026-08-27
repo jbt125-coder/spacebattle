@@ -84,11 +84,18 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 #selectScreen{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,rgba(0,80,120,0.18),transparent 60%),#000;z-index:90;display:none;flex-direction:column;align-items:center;padding:20px;overflow-y:auto;}
 #selectScreen h1{font-size:26px;font-weight:900;letter-spacing:4px;color:#00d4ff;text-shadow:0 0 8px rgba(0,212,255,0.6);margin-top:10px;text-align:center;}
 #selectSub{font-size:10px;letter-spacing:3px;color:rgba(0,212,255,0.45);margin-top:6px;margin-bottom:18px;text-align:center;text-transform:uppercase;}
-#roster{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;width:100%;max-width:520px;}
-.shipCard{position:relative;border:1px solid rgba(255,255,255,0.1);background:rgba(10,20,35,0.85);border-radius:10px;padding:10px 8px 8px;display:flex;flex-direction:column;align-items:center;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+#carousel{position:relative;display:flex;align-items:center;justify-content:center;gap:4px;width:100%;max-width:520px;}
+#carouselTrack{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;overflow:hidden;padding:8px 0;touch-action:pan-y;}
+.carouselArrow{flex-shrink:0;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.35);color:#66eaff;width:32px;height:32px;min-width:32px;border-radius:50%;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;}
+.carouselArrow:active{background:rgba(0,212,255,0.2);}
+.carouselSlot{flex-shrink:0;transition:transform 0.22s ease,opacity 0.22s ease;opacity:0.5;transform:scale(0.82);}
+.carouselSlot.carouselSlotCenter{opacity:1;transform:scale(1);}
+.carouselSlot .shipCard{width:118px;}
+.carouselSlot.carouselSlotCenter .shipCard{width:150px;}
+.shipCard{position:relative;border:1px solid rgba(255,255,255,0.1);background:rgba(10,20,35,0.85);border-radius:10px;padding:10px 8px 8px;display:flex;flex-direction:column;align-items:center;-webkit-tap-highlight-color:transparent;}
 .shipCard canvas{width:100%;height:64px;}
-.shipCardName{font-weight:800;letter-spacing:1.5px;font-size:12px;margin-top:4px;}
-.shipCardRole{font-size:9px;color:rgba(150,180,220,0.6);margin-top:2px;letter-spacing:1px;text-transform:uppercase;}
+.shipCardName{font-weight:800;letter-spacing:1.5px;font-size:12px;margin-top:4px;text-align:center;}
+.shipCardRole{font-size:9px;color:rgba(150,180,220,0.6);margin-top:2px;letter-spacing:1px;text-transform:uppercase;text-align:center;}
 .shipCardUpgradeBtn{margin-top:7px;width:100%;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.4);border-radius:5px;color:#66eaff;font-family:inherit;font-size:8px;letter-spacing:1.5px;padding:6px 4px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
 #shipDetail{margin-top:14px;width:100%;max-width:520px;border:1px solid rgba(0,212,255,0.2);border-left:3px solid #00d4ff;background:rgba(10,20,35,0.8);border-radius:8px;padding:12px 14px;font-size:11.5px;color:rgba(200,220,240,0.85);line-height:1.5;min-height:50px;}
 #gemBankRow{font-size:10px;letter-spacing:2px;color:#66eaff;text-shadow:0 0 8px rgba(102,234,255,0.5);margin-bottom:12px;display:flex;align-items:center;gap:5px;}
@@ -213,7 +220,15 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
   <h1>SPACE RANGERS</h1>
   <div id="selectSub">Choose your ranger -- Arena Protocol</div>
   <div id="gemBankRow"><span class="gicon">&#9670;</span>HANGAR CHEST: <span id="gemBankVal">0</span> GEMS</div>
-  <div id="roster"></div>
+  <div id="carousel">
+    <button id="carouselLeftBtn" class="carouselArrow" aria-label="Previous ship">&#10094;</button>
+    <div id="carouselTrack">
+      <div class="carouselSlot" id="slotLeft"></div>
+      <div class="carouselSlot carouselSlotCenter" id="slotCenter"></div>
+      <div class="carouselSlot" id="slotRight"></div>
+    </div>
+    <button id="carouselRightBtn" class="carouselArrow" aria-label="Next ship">&#10095;</button>
+  </div>
   <div id="shipDetail">Select a ranger to view dossier.</div>
   <button id="launchBtn">LAUNCH</button>
 </div>
@@ -925,52 +940,88 @@ function drawShipGlyph(gctx, cx, cy, scale, color, t, shipId){
   gctx.restore();
 }
 
+/* =====================================================================
+   SHIP CAROUSEL -- shows 3 ships at once (left/center/right), scrolled
+   left/right via arrow buttons or swipe/drag. Wraps around at the ends.
+   The centered ship is always the one selected for launch and dossier.
+===================================================================== */
 var cardCanvases=[];
-function buildRoster(){
-  var rosterEl=document.getElementById('roster');
-  for(var idx=0; idx<SHIPS.length; idx++){
-    (function(idx){
-      var ship=SHIPS[idx];
-      var card=document.createElement('div');
-      card.className='shipCard';
-      card.style.borderColor='rgba(255,255,255,0.1)';
-      if(idx===0) card.style.borderColor=ship.color;
+var carouselIndex=0; // index into SHIPS of the currently centered ship
 
-      var cv=document.createElement('canvas');
-      cv.width=120; cv.height=90;
-      card.appendChild(cv);
-      cardCanvases.push({cv:cv, ship:ship});
-
-      var nameEl=document.createElement('div');
-      nameEl.className='shipCardName'; nameEl.textContent=ship.name;
-      nameEl.style.color=ship.color;
-      card.appendChild(nameEl);
-
-      var roleEl=document.createElement('div');
-      roleEl.className='shipCardRole'; roleEl.textContent=ship.role;
-      card.appendChild(roleEl);
-
-      var upgradeBtn=document.createElement('button');
-      upgradeBtn.className='shipCardUpgradeBtn';
-      upgradeBtn.textContent='UPGRADE';
-      upgradeBtn.addEventListener('click',function(e){
-        e.stopPropagation();
-        openUpgradeModal(ship);
-      });
-      card.appendChild(upgradeBtn);
-
-      card.addEventListener('click',function(){
-        selectedShip=ship;
-        var allCards=document.querySelectorAll('.shipCard');
-        for(var k=0;k<allCards.length;k++) allCards[k].style.borderColor='rgba(255,255,255,0.1)';
-        card.style.borderColor=ship.color;
-        updateDetail();
-      });
-
-      rosterEl.appendChild(card);
-    })(idx);
-  }
+function shipAtOffset(offset){
+  var n=SHIPS.length;
+  return SHIPS[((carouselIndex+offset)%n+n)%n];
 }
+
+function buildShipCard(ship, isCenter){
+  var card=document.createElement('div');
+  card.className='shipCard';
+  card.style.borderColor = isCenter ? ship.color : 'rgba(255,255,255,0.1)';
+
+  var cv=document.createElement('canvas');
+  cv.width=120; cv.height=90;
+  card.appendChild(cv);
+  cardCanvases.push({cv:cv, ship:ship});
+
+  var nameEl=document.createElement('div');
+  nameEl.className='shipCardName'; nameEl.textContent=ship.name;
+  nameEl.style.color=ship.color;
+  card.appendChild(nameEl);
+
+  var roleEl=document.createElement('div');
+  roleEl.className='shipCardRole'; roleEl.textContent=ship.role;
+  card.appendChild(roleEl);
+
+  var upgradeBtn=document.createElement('button');
+  upgradeBtn.className='shipCardUpgradeBtn';
+  upgradeBtn.textContent='UPGRADE';
+  upgradeBtn.addEventListener('click',function(e){
+    e.stopPropagation();
+    openUpgradeModal(ship);
+  });
+  card.appendChild(upgradeBtn);
+
+  return card;
+}
+
+function renderCarousel(){
+  cardCanvases=[];
+  var slotLeft=document.getElementById('slotLeft');
+  var slotCenter=document.getElementById('slotCenter');
+  var slotRight=document.getElementById('slotRight');
+  slotLeft.innerHTML=''; slotCenter.innerHTML=''; slotRight.innerHTML='';
+
+  slotLeft.appendChild(buildShipCard(shipAtOffset(-1), false));
+  slotCenter.appendChild(buildShipCard(shipAtOffset(0), true));
+  slotRight.appendChild(buildShipCard(shipAtOffset(1), false));
+
+  selectedShip=shipAtOffset(0);
+  updateDetail();
+}
+function carouselPrev(){ carouselIndex=(carouselIndex-1+SHIPS.length)%SHIPS.length; renderCarousel(); }
+function carouselNext(){ carouselIndex=(carouselIndex+1)%SHIPS.length; renderCarousel(); }
+
+document.getElementById('carouselLeftBtn').addEventListener('click', carouselPrev);
+document.getElementById('carouselRightBtn').addEventListener('click', carouselNext);
+
+(function(){
+  var track=document.getElementById('carouselTrack');
+  var dragging=false, startX=0;
+  var SWIPE_THRESHOLD=40;
+  function start(x){ dragging=true; startX=x; }
+  function end(x){
+    if(!dragging) return;
+    dragging=false;
+    var dx=x-startX;
+    if(dx<=-SWIPE_THRESHOLD) carouselNext();
+    else if(dx>=SWIPE_THRESHOLD) carouselPrev();
+  }
+  track.addEventListener('touchstart',function(e){ start(e.touches[0].clientX); },{passive:true});
+  track.addEventListener('touchend',function(e){ end(e.changedTouches[0].clientX); });
+  track.addEventListener('touchcancel',function(){ dragging=false; });
+  track.addEventListener('mousedown',function(e){ start(e.clientX); e.preventDefault(); });
+  window.addEventListener('mouseup',function(e){ if(dragging) end(e.clientX); });
+})();
 function updateDetail(){
   var d=document.getElementById('shipDetail');
   d.style.borderLeftColor=selectedShip.color;
@@ -1066,8 +1117,7 @@ document.getElementById('launchBtn').addEventListener('click',function(){
   startGame();
 });
 
-buildRoster();
-updateDetail();
+renderCarousel();
 animateCards();
 
 /* =====================================================================
