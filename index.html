@@ -1486,7 +1486,7 @@ var netPeer=null;             // PeerJS Peer instance
 var netConn=null;             // PeerJS DataConnection
 var pendingFx=[];             // host-only: burst events queued since the last snapshot
 var netSendTimer=0;
-var NET_TICK_MS=66;           // ~15Hz
+var NET_TICK_MS=50;           // ~20Hz
 var guestChosenShip=null;     // host-only: ship def the connected guest picked
 var guestChosenLevels=null;   // host-only: guest's own upgrade levels for that ship
 var guestReadyToLaunch=false; // host-only: guest has chosen a ship and can be launched with
@@ -1673,11 +1673,14 @@ function handleGuestMessage(msg){
   }
 }
 
-// Guest-only: lightweight stand-ins for bots[] built fresh from each
-// snapshot, purely for drawing/minimap -- never touched by AI or physics.
+// Guest-only: lightweight stand-ins for bots[] -- purely for drawing/
+// minimap, never touched by AI or physics. Kept alive across snapshots
+// (see applyGuestSnapshot) so their trail accumulates and they can glide
+// toward each new tx/ty/tangle target instead of teleporting there.
 function shipFromSnapshot(s){
   return {
     def: shipDefById(s.defId) || SHIPS[0], x:s.x, y:s.y, angle:s.angle,
+    tx:s.x, ty:s.y, tangle:s.angle,
     hp:s.hp, maxHp:s.maxHp, r:16, alive:s.alive, invincible:s.invincible||0,
     ammo:s.ammo, abilityCharge:s.abilityCharge, carryingGems:s.carryingGems||0,
     boosted:s.boosted||0, isPlayer:false, trail:[], vx:0, vy:0
@@ -1715,7 +1718,19 @@ function startGuestMatch(msg){
 function applyGuestSnapshot(msg){
   if(!gameActive || !msg.me) return;
   var wasAlive=player.alive;
-  player.x=msg.me.x; player.y=msg.me.y; player.angle=msg.me.angle;
+
+  // Position/angle are otherwise owned by this device's own client-side
+  // prediction (guestPredictOwnShip), so controls feel instant instead of
+  // waiting on a host round-trip. Only correct here: snap on a big jump
+  // (death/respawn, a teleport ability), gently blend on small drift
+  // (obstacle collisions, float rounding) so corrections aren't visible.
+  var dx=msg.me.x-player.x, dy=msg.me.y-player.y;
+  if(Math.sqrt(dx*dx+dy*dy) > 60){
+    player.x=msg.me.x; player.y=msg.me.y; player.angle=msg.me.angle;
+  } else {
+    player.x += dx*0.3; player.y += dy*0.3;
+    player.angle += angDiff(player.angle, msg.me.angle)*0.3;
+  }
   player.hp=msg.me.hp; player.maxHp=msg.me.maxHp; player.alive=msg.me.alive;
   player.ammo=msg.me.ammo; player.abilityCharge=msg.me.abilityCharge;
   player.hitStreak=msg.me.hitStreak||0;
@@ -1723,9 +1738,25 @@ function applyGuestSnapshot(msg){
   player.trail.push({x:player.x,y:player.y});
   if(player.trail.length>20) player.trail.shift();
 
-  var newBots=[];
-  for(var i=0;i<msg.others.length;i++) newBots.push(shipFromSnapshot(msg.others[i]));
-  bots=newBots;
+  // Other ships: reuse the same persistent entities across ticks (stable
+  // array-index correspondence with the host's [player].concat(bots)
+  // ordering) and just set fresh interpolation targets, rather than
+  // rebuilding/teleporting them every network tick.
+  if(bots.length!==msg.others.length){
+    var freshBots=[];
+    for(var i=0;i<msg.others.length;i++) freshBots.push(shipFromSnapshot(msg.others[i]));
+    bots=freshBots;
+  } else {
+    for(var i=0;i<msg.others.length;i++){
+      var s=msg.others[i], e=bots[i];
+      e.def=shipDefById(s.defId)||e.def;
+      var tickFrames=NET_TICK_MS/16.67;
+      e.vx=(s.x-e.tx)/tickFrames; e.vy=(s.y-e.ty)/tickFrames; // rough estimate, just to drive the thrust-flame visual
+      e.tx=s.x; e.ty=s.y; e.tangle=s.angle;
+      e.hp=s.hp; e.maxHp=s.maxHp; e.alive=s.alive; e.invincible=s.invincible||0;
+      e.ammo=s.ammo; e.abilityCharge=s.abilityCharge; e.carryingGems=s.carryingGems||0; e.boosted=s.boosted||0;
+    }
+  }
 
   bullets=msg.bullets;
   gems=msg.gems.map(function(g){ return {x:g.x,y:g.y,r:10,pulse:performance.now()*0.004,alive:true}; });
@@ -2101,14 +2132,22 @@ function updateBotAI(b, dt){
 // player, or -- on the host -- a connected guest's ship driven by their
 // latest received input packet instead of local keys/btn). `input` is a
 // plain {turnLeft, turnRight, thrustOn, fireOn} object.
-function updateControlledShip(ent, input, dt){
+//
+// `movementOnly` skips cooldown/ability timers and firing entirely -- used
+// for the guest's own client-side prediction (see guestPredictOwnShip),
+// which mirrors this ship's *movement* instantly instead of waiting on a
+// host round-trip, while leaving combat state (hp/ammo/ability/hits) as
+// strictly host-authoritative, arriving only via network snapshots.
+function updateControlledShip(ent, input, dt, movementOnly){
   if(!ent.alive) return;
-  if(ent.invincible>0) ent.invincible -= dt;
-  if(ent.cooldown>0) ent.cooldown -= dt;
-  if(ent.abilityCd>0) ent.abilityCd -= dt;
-  if(ent.abilityActive>0){
-    ent.abilityActive -= dt;
-    if(ent.def.id==='vanguard') ent.boosted=ent.abilityActive;
+  if(!movementOnly){
+    if(ent.invincible>0) ent.invincible -= dt;
+    if(ent.cooldown>0) ent.cooldown -= dt;
+    if(ent.abilityCd>0) ent.abilityCd -= dt;
+    if(ent.abilityActive>0){
+      ent.abilityActive -= dt;
+      if(ent.def.id==='vanguard') ent.boosted=ent.abilityActive;
+    }
   }
 
   var turnRate=ent.def.turnRate;
@@ -2139,6 +2178,8 @@ function updateControlledShip(ent, input, dt){
 
   ent.trail.push({x:ent.x,y:ent.y});
   if(ent.trail.length>20) ent.trail.shift();
+
+  if(movementOnly) return;
 
   var rate=ent.def.fireRate * (boostMul<1.7?1:0.6);
   if(input.fireOn && ent.cooldown<=0 && ent.ammo>0){
@@ -2273,14 +2314,53 @@ function updateCamera(dt){
 /* =====================================================================
    MAIN UPDATE
 ===================================================================== */
-// Guest-only: no local physics or AI at all -- the host is authoritative.
-// Just track the camera on the last snapshot position, animate local-only
-// particles, and stream this device's input to the host.
+// Guest-only: combat/AI stays fully host-authoritative, but two things run
+// locally every frame so controls don't feel like they're waiting on a
+// network round-trip:
+//  - guestPredictOwnShip: this device's own ship moves instantly from its
+//    own input, using the exact same movement code the host uses; small
+//    drift from the host's confirmed position is corrected gently each
+//    snapshot (see applyGuestSnapshot), large drift (a teleport ability,
+//    a death/respawn) snaps immediately.
+//  - guestInterpolateOthers: every other ship glides toward its latest
+//    known position instead of jumping there once per network tick.
 function guestClientTick(dt){
   if(alertTimer>0){ alertTimer-=dt; if(alertTimer<=0) document.getElementById('alertBar').classList.remove('show'); }
+  guestPredictOwnShip(dt);
+  guestInterpolateOthers(dt);
   updateParticles(dt);
   updateCamera(dt);
   guestNetworkTick(dt);
+}
+function guestPredictOwnShip(dt){
+  if(!player.alive) return;
+  var input={
+    turnLeft: keys['ArrowLeft']||keys['KeyA']||btn.left,
+    turnRight: keys['ArrowRight']||keys['KeyD']||btn.right,
+    thrustOn: keys['ArrowUp']||keys['KeyW']||btn.thrust,
+    fireOn: keys['Space']||btn.fire
+  };
+  updateControlledShip(player, input, dt, true);
+}
+// Smoothly move every other ship toward the position its latest snapshot
+// reported (stored as tx/ty/tangle by applyGuestSnapshot) instead of
+// teleporting it there once per network tick. Also extrapolates bullets
+// along their known velocity between snapshots for the same reason.
+function guestInterpolateOthers(dt){
+  var LERP=0.28;
+  for(var i=0;i<bots.length;i++){
+    var e=bots[i];
+    if(e.tx===undefined) continue;
+    e.x += (e.tx-e.x)*LERP;
+    e.y += (e.ty-e.y)*LERP;
+    e.angle += angDiff(e.angle, e.tangle)*LERP;
+    e.trail.push({x:e.x,y:e.y});
+    if(e.trail.length>16) e.trail.shift();
+  }
+  for(var b=0;b<bullets.length;b++){
+    bullets[b].x += bullets[b].vx*(dt/16.67);
+    bullets[b].y += bullets[b].vy*(dt/16.67);
+  }
 }
 function guestNetworkTick(dt){
   if(!netConn || !netConn.open) return;
