@@ -321,8 +321,9 @@ var SHIPS = [
     id:'wraith', name:'WRAITH', role:'Blink Duelist', color:'#aa55ff', rgb:'170,85,255',
     hp:95, turnRate:0.075, thrustPower:0.26, maxSpeed:8.6, drag:0.985,
     fireRate:230, bulletSpeed:10.5, bulletDamage:7, bulletLife:1800,
+    burstCount:3, burstDelay:70, // each trigger pull fires 3 in a line for the cost of 1 shot
     ability:{name:'PHASE BLINK', icon:'>>', cooldown:8500, duration:1, desc:'Instantly teleports forward, dashing through obstacles and fire.'},
-    desc:'Fragile but relentless. Fires fast and lands a short-range teleport to reposition or finish a fleeing bot.'
+    desc:'Fragile but relentless. Every trigger pull rattles off a straight line of three rounds for the cost of one shot -- a full clip is nine rounds downrange. Pairs with a short-range teleport to reposition or finish a fleeing bot.'
   },
   {
     id:'longshot', name:'LONGSHOT', role:'Sniper', color:'#ffb020', rgb:'255,176,32',
@@ -342,8 +343,15 @@ var SHIPS = [
     id:'seraph', name:'SERAPH', role:'Support', color:'#ff44aa', rgb:'255,68,170',
     hp:110, turnRate:0.065, thrustPower:0.22, maxSpeed:7.4, drag:0.986,
     fireRate:340, bulletSpeed:9, bulletDamage:9, bulletLife:1900,
-    ability:{name:'REPAIR DRONE', icon:'+', cooldown:17000, duration:1, desc:'Deploys a drone that restores a large chunk of hull integrity.'},
-    desc:'A balanced fighter that can patch its own hull mid-fight, letting it outlast bots in longer engagements.'
+    ability:{name:'REPAIR DRONE', icon:'+', cooldown:17000, duration:1, desc:'Deploys a drone that restores a large chunk of hull integrity. If already at full hull, plants a small turret that fires nonstop at the nearest enemy until it takes a single hit.'},
+    desc:'A balanced fighter that can patch its own hull mid-fight, letting it outlast bots in longer engagements. Already full? The same call summons a deputy turret instead.'
+  },
+  {
+    id:'bruiser', name:'BRUISER TANK', role:'Beam Tank', color:'#ff5500', rgb:'255,85,0',
+    hp:200, turnRate:0.045, thrustPower:0.18, maxSpeed:5.2, drag:0.988,
+    beamWeapon:true, beamRange:320, beamDPS:32, beamDuration:2000,
+    ability:{name:'TRACTOR BEAM', icon:'<<', cooldown:14000, duration:2000, pullRange:350, desc:'Projects a pulsing field that drags every nearby enemy in close, no damage of its own -- just sets them up for the beam.'},
+    desc:'The slowest, toughest hull in the fleet. Its only weapon is a sustained beam that channels for two full seconds using the entire ammo bar in one commitment -- devastating to anything caught in a straight line, but a long recharge afterward.'
   }
 ];
 
@@ -416,7 +424,8 @@ function effectiveStatsFromLevels(def, levels){
   return {
     maxSpeed: def.maxSpeed * (1 + 0.10*levels.speedLvl),
     thrustPower: def.thrustPower * (1 + 0.10*levels.speedLvl),
-    bulletDamage: def.bulletDamage * (1 + 0.10*levels.damageLvl),
+    bulletDamage: (def.bulletDamage||0) * (1 + 0.10*levels.damageLvl),
+    beamDPS: (def.beamDPS||0) * (1 + 0.10*levels.damageLvl), // Bruiser's DAMAGE upgrade scales its beam instead
     hp: Math.round(def.hp * (1 + 0.10*levels.shieldLvl))
   };
 }
@@ -447,6 +456,14 @@ function rndI(a,b){ return Math.floor(rnd(a,b+1)); }
 function dst(ax,ay,bx,by){ return Math.sqrt((ax-bx)*(ax-bx)+(ay-by)*(ay-by)); }
 function angTo(ax,ay,bx,by){ return Math.atan2(by-ay,bx-ax); }
 function angDiff(a,b){ var d=(b-a+Math.PI*3)%(Math.PI*2)-Math.PI; return d; }
+// Shortest distance from point (px,py) to the line segment (x1,y1)-(x2,y2).
+function distPointToSegment(px,py,x1,y1,x2,y2){
+  var dx=x2-x1, dy=y2-y1;
+  var lenSq=dx*dx+dy*dy;
+  var t = lenSq>0 ? clamp(((px-x1)*dx+(py-y1)*dy)/lenSq, 0, 1) : 0;
+  var cx=x1+t*dx, cy=y1+t*dy;
+  return dst(px,py,cx,cy);
+}
 function hexRGB(h){
   try{ var r=parseInt(h.slice(1,3),16),g=parseInt(h.slice(3,5),16),b=parseInt(h.slice(5,7),16); return r+','+g+','+b; }
   catch(e){ return '200,200,200'; }
@@ -574,6 +591,32 @@ function updateShieldStation(dt){
     if(e.hp>=e.maxHp) continue;
     if(dst(e.x,e.y,shieldStation.x,shieldStation.y) < shieldStation.r+e.r){
       e.hp = Math.min(e.maxHp, e.hp + e.maxHp*SHIELD_HEAL_RATE*(dt/1000));
+    }
+  }
+}
+
+/* =====================================================================
+   TRACTOR PULL -- Bruiser's ability. Purely positional (no damage of its
+   own): while active, drags every other living ship within pullRange
+   steadily toward the Bruiser, setting them up for its beam. Scans for
+   any currently-active Bruiser each frame rather than being triggered
+   from a single entity, same pattern as the shield station's single pass
+   over allShips().
+===================================================================== */
+function updateTractorPull(dt){
+  var all=allShips();
+  for(var i=0;i<all.length;i++){
+    var puller=all[i];
+    if(!puller.alive || puller.def.id!=='bruiser' || puller.abilityActive<=0) continue;
+    var pullRange=puller.def.ability.pullRange||350;
+    for(var j=0;j<all.length;j++){
+      var tgt=all[j];
+      if(tgt===puller || !tgt.alive) continue;
+      var d=dst(tgt.x,tgt.y,puller.x,puller.y);
+      if(d>pullRange || d<1) continue;
+      var ang=angTo(tgt.x,tgt.y,puller.x,puller.y);
+      tgt.vx += Math.cos(ang)*0.35*(dt/16.67);
+      tgt.vy += Math.sin(ang)*0.35*(dt/16.67);
     }
   }
 }
@@ -984,6 +1027,9 @@ function drawShipGlyph(gctx, cx, cy, scale, color, t, shipId){
   } else if(shipId==='swarmer'){
     gctx.moveTo(18,0); gctx.lineTo(-4,10); gctx.lineTo(-16,16); gctx.lineTo(-8,0);
     gctx.lineTo(-16,-16); gctx.lineTo(-4,-10); gctx.closePath();
+  } else if(shipId==='bruiser'){
+    gctx.moveTo(20,0); gctx.lineTo(10,10); gctx.lineTo(-16,10); gctx.lineTo(-20,4);
+    gctx.lineTo(-20,-4); gctx.lineTo(-16,-10); gctx.lineTo(10,-10); gctx.closePath();
   } else {
     gctx.moveTo(20,0); gctx.lineTo(0,8); gctx.lineTo(-14,6); gctx.lineTo(-8,0);
     gctx.lineTo(-14,-6); gctx.lineTo(0,-8); gctx.closePath();
@@ -1222,6 +1268,7 @@ animateCards();
    ENTITIES
 ===================================================================== */
 var player, bots=[], bullets=[], particles=[], gems=[];
+var turrets=[]; // Seraph deputy turrets -- see spawnTurret/updateTurrets
 var killCount=0, gameActive=false, alertTimer=0, lastTime=0;
 var TOTAL_BOTS=6;
 
@@ -1261,7 +1308,9 @@ function makeShipEntity(def,x,y,isPlayer){
     idleTimer:0, // ms since last fired -- drives passive idle/flying regen
     thrusting:false, // true this frame if applying thrust -- halves the idle regen rate
     ammo:MAX_AMMO, ammoRegenTimer:0, // limited-shot pool, regenerates over time
-    abilityCharge:1, hitStreak:0 // ability starts charged; recharges via 3 landed hits
+    abilityCharge:1, hitStreak:0, // ability starts charged; recharges via 3 landed hits
+    burstRemaining:0, burstTimer:0, burstAngle:0, // Wraith-style queued burst-fire follow-up shots
+    beamActive:0, beamAngle:0, beamTickTimer:0, beamRangeNow:0 // beam-weapon (Bruiser) channel state
   };
 }
 
@@ -1320,6 +1369,100 @@ function fireBullet(owner, angle, forcePierce, isFlak, isAbilityShot){
 function bulletAlreadyHit(b, ent){
   for(var i=0;i<b.hitSet.length;i++) if(b.hitSet[i]===ent) return true;
   return false;
+}
+
+// Shared "start a new trigger pull" entry point -- fires the first bullet
+// immediately (identical to a plain fireBullet call for every ship without
+// a burstCount), then arms a queued burst of follow-up shots in the same
+// locked direction for ships like Wraith, so the whole burst still counts
+// as a single ammo cost. Every "new shot" call site should go through this
+// instead of calling fireBullet directly.
+function beginFire(ent, angle, forcePierce, isFlak, isAbilityShot){
+  fireBullet(ent, angle, forcePierce, isFlak, isAbilityShot);
+  var burstCount=ent.def.burstCount||1;
+  if(burstCount>1){
+    ent.burstRemaining=burstCount-1;
+    ent.burstAngle=angle;
+    ent.burstTimer=ent.def.burstDelay||70;
+  }
+}
+// Ticks queued burst follow-up shots (see beginFire) for any entity, every
+// frame -- called alongside updateAmmoRegen for player/remotePlayer/bots.
+function updateBurstFire(ent, dt){
+  if(!ent.alive || ent.burstRemaining<=0) return;
+  ent.burstTimer -= dt;
+  if(ent.burstTimer<=0){
+    fireBullet(ent, ent.burstAngle);
+    ent.burstRemaining--;
+    ent.burstTimer=ent.def.burstDelay||70;
+  }
+}
+
+// Bruiser's sustained beam: ticks damage every BEAM_TICK_MS for the whole
+// channel instead of firing discrete bullets. Unlike a bullet hit, it does
+// NOT apply post-hit invincibility -- the same target can be ticked every
+// interval for the full 2 seconds if it stays in the line. The beam's
+// range truncates at the first obstacle it crosses (ray-sampled against
+// the same `obstacles` rects bullets already collide with).
+var BEAM_TICK_MS=100;
+function updateBeamWeapon(ent, dt){
+  if(!ent.alive || ent.beamActive<=0) return;
+  ent.beamActive -= dt;
+  ent.beamTickTimer -= dt;
+  if(ent.beamTickTimer>0) return;
+  ent.beamTickTimer=BEAM_TICK_MS;
+
+  var fullRange=ent.def.beamRange;
+  var range=fullRange;
+  for(var d=10; d<=fullRange; d+=10){
+    var px=ent.x+Math.cos(ent.beamAngle)*d, py=ent.y+Math.sin(ent.beamAngle)*d;
+    var blocked=false;
+    for(var o=0;o<obstacles.length;o++){
+      if(circleRectHit(px,py,2,obstacles[o])){ blocked=true; break; }
+    }
+    if(blocked){ range=d; break; }
+  }
+  ent.beamRangeNow=range; // drawn each frame from this
+
+  var ex=ent.x+Math.cos(ent.beamAngle)*range, ey=ent.y+Math.sin(ent.beamAngle)*range;
+  var dps = (ent.isPlayer && ent.eff) ? ent.eff.beamDPS : ent.def.beamDPS;
+  var tickDamage=(dps||0)*(BEAM_TICK_MS/1000);
+  var all=allShips();
+  for(var i=0;i<all.length;i++){
+    var tgt=all[i];
+    if(tgt===ent || !tgt.alive || tgt.invincible>0) continue;
+    if(distPointToSegment(tgt.x,tgt.y, ent.x,ent.y, ex,ey) > tgt.r+6) continue;
+
+    tgt.hp -= tickDamage;
+    spawnBurst(tgt.x,tgt.y,ent.def.color,3);
+    sfxHit();
+
+    // Landing beam ticks builds toward an ability recharge exactly like a
+    // regular bullet hit does (3 landed hits = +1 charge).
+    if(ent.abilityCharge<1){
+      ent.hitStreak++;
+      if(ent.hitStreak>=HITS_TO_RECHARGE_ABILITY){
+        ent.hitStreak=0;
+        ent.abilityCharge=1;
+        if(ent===player){ showAlert('ABILITY RECHARGED', 1800); }
+      }
+    }
+
+    if(tgt.hp<=0 && tgt.alive){
+      tgt.alive=false;
+      spawnBurst(tgt.x,tgt.y,tgt.def.color,28);
+      sfxShipExplosion();
+      if(!tgt.isPlayer && (ent===player || ent===remotePlayer)){
+        killCount++;
+        spawnGem(tgt.x, tgt.y);
+        for(var gi=0; gi<tgt.carryingGems; gi++){
+          spawnGem(tgt.x + rnd(-24,24), tgt.y + rnd(-24,24));
+        }
+        tgt.carryingGems=0;
+      }
+      if(!tgt.isPlayer) tgt.respawnTimer = rnd(3000,5000);
+    }
+  }
 }
 function spawnBurst(x,y,color,n){
   var rgb=hexRGB(color);
@@ -1396,6 +1539,7 @@ function triggerAbilityFor(ent){
     ent.hitStreak=0;
     ent.abilityCd=ent.def.ability.cooldown; // kept for the visual cooldown flash only
     ent.abilityActive=ent.def.ability.duration;
+    ent.idleTimer=0;
     if(ent===player) sfxAbility();
     if(ent.def.id==='wraith'){
       ent.x += Math.cos(ent.angle)*150;
@@ -1407,7 +1551,14 @@ function triggerAbilityFor(ent){
     } else if(ent.def.id==='swarmer'){
       for(var i=0;i<12;i++) fireBullet(ent, (Math.PI*2/12)*i, false, true, true);
     } else if(ent.def.id==='seraph'){
-      ent.hp=Math.min(ent.maxHp, ent.hp + ent.maxHp*0.45);
+      if(ent.hp>=ent.maxHp){
+        spawnTurret(ent);
+      } else {
+        ent.hp=Math.min(ent.maxHp, ent.hp + ent.maxHp*0.45);
+      }
+    } else if(ent.def.id==='bruiser'){
+      // handled by updateTractorPull, which scans for any active Bruiser
+      // each frame rather than being triggered from here
     }
   }
 }
@@ -1424,6 +1575,68 @@ function triggerAbility(){
 }
 document.getElementById('abilityBtn').addEventListener('touchstart',function(e){ e.preventDefault(); triggerAbility(); },{passive:false});
 document.getElementById('abilityBtn').addEventListener('click',function(){ triggerAbility(); });
+
+/* =====================================================================
+   SERAPH DEPUTY TURRET -- when Seraph's heal would be a no-op (already
+   at full hull), the same ability call drops a small stationary turret
+   instead. It tracks and fires at the nearest enemy for 1 damage a hit,
+   nonstop, no ammo limit -- but goes down in exactly one hit itself.
+===================================================================== */
+var TURRET_FIRE_RATE=300; // ms between shots
+
+function spawnTurret(ownerEnt){
+  turrets.push({
+    x:ownerEnt.x, y:ownerEnt.y, angle:ownerEnt.angle, alive:true,
+    color:ownerEnt.def.color, ownerEnt:ownerEnt, fireTimer:0
+  });
+}
+// Nearest living ship to this turret, excluding whoever summoned it.
+function nearestEnemyOfTurret(t){
+  var all=allShips(), best=null, bestD=Infinity;
+  for(var i=0;i<all.length;i++){
+    var e=all[i];
+    if(!e.alive || e===t.ownerEnt) continue;
+    var d=dst(t.x,t.y,e.x,e.y);
+    if(d<bestD){ bestD=d; best=e; }
+  }
+  return best;
+}
+// Bullets are attributed to the turret's owner (not the turret itself) so
+// kill-crediting and gem drops work exactly like every other ability shot.
+function fireDeputyBullet(t, angle){
+  bullets.push({
+    x:t.x+Math.cos(angle)*14, y:t.y+Math.sin(angle)*14,
+    vx:Math.cos(angle)*9, vy:Math.sin(angle)*9,
+    life:1400, color:t.color, size:2.2,
+    damage:1, owner:t.ownerEnt, piercing:false, hitSet:[], isAbilityShot:false
+  });
+}
+function updateTurrets(dt){
+  for(var i=turrets.length-1;i>=0;i--){
+    var t=turrets[i];
+    if(!t.alive){ turrets.splice(i,1); continue; }
+    var target=nearestEnemyOfTurret(t);
+    if(target){
+      t.angle=angTo(t.x,t.y,target.x,target.y);
+      t.fireTimer -= dt;
+      if(t.fireTimer<=0){
+        fireDeputyBullet(t, t.angle);
+        t.fireTimer=TURRET_FIRE_RATE;
+      }
+    }
+  }
+}
+function drawTurret(t){
+  ctx.save();
+  ctx.translate(t.x,t.y);
+  ctx.rotate(t.angle);
+  ctx.shadowColor=t.color; ctx.shadowBlur=8;
+  ctx.strokeStyle=t.color; ctx.fillStyle='rgba(0,10,20,0.85)'; ctx.lineWidth=1.5;
+  ctx.beginPath();
+  ctx.moveTo(8,0); ctx.lineTo(-6,5); ctx.lineTo(-6,-5); ctx.closePath();
+  ctx.fill(); ctx.stroke();
+  ctx.restore();
+}
 
 /* =====================================================================
    TOUCH CONTROLS -- joystick (turn) + thrust + fire (reference scheme)
@@ -1591,8 +1804,9 @@ function serializeShip(e){
   return {
     defId:e.def.id, x:e.x, y:e.y, angle:e.angle, hp:e.hp, maxHp:e.maxHp,
     alive:e.alive, invincible:e.invincible, ammo:e.ammo,
-    abilityCharge:e.abilityCharge, hitStreak:e.hitStreak,
-    carryingGems:e.carryingGems, boosted:e.boosted
+    abilityCharge:e.abilityCharge, hitStreak:e.hitStreak, abilityActive:e.abilityActive,
+    carryingGems:e.carryingGems, boosted:e.boosted,
+    beamActive:e.beamActive, beamAngle:e.beamAngle, beamRangeNow:e.beamRangeNow
   };
 }
 function hostNetworkTick(dt){
@@ -1612,6 +1826,7 @@ function hostNetworkTick(dt){
     others: others,
     bullets: bullets.map(function(b){ return {x:b.x,y:b.y,vx:b.vx,vy:b.vy,color:b.color,size:b.size}; }),
     gems: gems.map(function(g){ return {x:g.x,y:g.y}; }),
+    turrets: turrets.filter(function(t){ return t.alive; }).map(function(t){ return {x:t.x,y:t.y,angle:t.angle,color:t.color}; }),
     killCount: killCount,
     remaining: remaining,
     fx: pendingFx
@@ -1688,8 +1903,10 @@ function shipFromSnapshot(s){
     def: shipDefById(s.defId) || SHIPS[0], x:s.x, y:s.y, angle:s.angle,
     tx:s.x, ty:s.y, tangle:s.angle,
     hp:s.hp, maxHp:s.maxHp, r:16, alive:s.alive, invincible:s.invincible||0,
-    ammo:s.ammo, abilityCharge:s.abilityCharge, carryingGems:s.carryingGems||0,
-    boosted:s.boosted||0, isPlayer:false, trail:[], vx:0, vy:0
+    ammo:s.ammo, abilityCharge:s.abilityCharge, abilityActive:s.abilityActive||0,
+    carryingGems:s.carryingGems||0, boosted:s.boosted||0,
+    beamActive:s.beamActive||0, beamAngle:s.beamAngle||0, beamRangeNow:s.beamRangeNow||0,
+    isPlayer:false, trail:[], vx:0, vy:0
   };
 }
 function startGuestMatch(msg){
@@ -1699,7 +1916,7 @@ function startGuestMatch(msg){
   guestMatchEnded=false;
   gemsCollectedThisMatch=0;
   killCount=0;
-  bullets=[]; particles=[]; gems=[]; bots=[];
+  bullets=[]; particles=[]; gems=[]; bots=[]; turrets=[];
 
   player=makeShipEntity(selectedShip, WW/2, WH/2, true);
   player.eff=effectiveStatsFromLevels(selectedShip, getShipProgress(selectedShip.id));
@@ -1741,6 +1958,10 @@ function applyGuestSnapshot(msg){
   player.ammo=msg.me.ammo; player.abilityCharge=msg.me.abilityCharge;
   player.hitStreak=msg.me.hitStreak||0;
   player.boosted=msg.me.boosted||0;
+  player.abilityActive=msg.me.abilityActive||0;
+  player.beamActive=msg.me.beamActive||0;
+  player.beamAngle=msg.me.beamAngle||0;
+  player.beamRangeNow=msg.me.beamRangeNow||0;
   player.trail.push({x:player.x,y:player.y});
   if(player.trail.length>20) player.trail.shift();
 
@@ -1760,12 +1981,17 @@ function applyGuestSnapshot(msg){
       e.vx=(s.x-e.tx)/tickFrames; e.vy=(s.y-e.ty)/tickFrames; // rough estimate, just to drive the thrust-flame visual
       e.tx=s.x; e.ty=s.y; e.tangle=s.angle;
       e.hp=s.hp; e.maxHp=s.maxHp; e.alive=s.alive; e.invincible=s.invincible||0;
-      e.ammo=s.ammo; e.abilityCharge=s.abilityCharge; e.carryingGems=s.carryingGems||0; e.boosted=s.boosted||0;
+      e.ammo=s.ammo; e.abilityCharge=s.abilityCharge; e.abilityActive=s.abilityActive||0;
+      e.carryingGems=s.carryingGems||0; e.boosted=s.boosted||0;
+      e.beamActive=s.beamActive||0; e.beamAngle=s.beamAngle||0; e.beamRangeNow=s.beamRangeNow||0;
     }
   }
 
   bullets=msg.bullets;
   gems=msg.gems.map(function(g){ return {x:g.x,y:g.y,r:10,pulse:performance.now()*0.004,alive:true}; });
+  // Turrets are stationary once placed, so a wholesale replace each tick
+  // (no interpolation needed) is simplest and never visibly jitters.
+  turrets=(msg.turrets||[]).map(function(t){ return {x:t.x,y:t.y,angle:t.angle,alive:true,color:t.color}; });
   killCount=msg.killCount;
 
   updateHUD();
@@ -1805,7 +2031,7 @@ function startGame(){
   player=makeShipEntity(selectedShip, WW/2, WH/2, true);
   player.angle=-Math.PI/2;
   player.invincible=1500;
-  bots=[]; bullets=[]; particles=[]; gems=[]; killCount=0;
+  bots=[]; bullets=[]; particles=[]; gems=[]; turrets=[]; killCount=0;
   gemsCollectedThisMatch=0;
   remotePlayer=null;
   lastGuestInput={turnLeft:false, turnRight:false, thrustOn:false, fireOn:false};
@@ -2028,9 +2254,11 @@ function updateBotAI(b, dt){
     if(sp1>maxSp1){ b.vx=b.vx/sp1*maxSp1; b.vy=b.vy/sp1*maxSp1; }
 
     // A fleeing bot with no gem may still take a defensive shot if cornered
+    // -- beam-weapon ships can't snap off a quick defensive shot like this
+    // (they need the full ammo bar and a committed 2s channel), so skip it.
     b.cooldown -= dt;
-    if(b.aiState==='flee' && b.cooldown<=0 && distToPlayer<DANGER_RANGE && threatEnt && b.ammo>0){
-      fireBullet(b, faceAngle);
+    if(!b.def.beamWeapon && b.aiState==='flee' && b.cooldown<=0 && distToPlayer<DANGER_RANGE && threatEnt && b.ammo>0){
+      beginFire(b, faceAngle);
       b.ammo--;
       b.cooldown = b.def.fireRate*1.8;
       b.idleTimer=0;
@@ -2101,34 +2329,31 @@ function updateBotAI(b, dt){
   if(sp>maxSp){ b.vx=b.vx/sp*maxSp; b.vy=b.vy/sp*maxSp; }
 
   b.cooldown -= dt;
-  if(b.cooldown<=0 && bestD < idealRange+130 && b.ammo>0){
+  if(b.def.beamWeapon){
+    if(b.beamActive<=0 && b.ammo>=MAX_AMMO && bestD < idealRange+130){
+      b.ammo=0;
+      b.beamActive=b.def.beamDuration||2000;
+      b.beamAngle=angleToTarget;
+      b.beamTickTimer=0;
+      b.idleTimer=0;
+    }
+  } else if(b.cooldown<=0 && bestD < idealRange+130 && b.ammo>0){
     var spread=(Math.random()-0.5)*(b.def.spread||0.1)*2;
     var shots=b.def.bulletsPerShot||1;
     for(var s=0;s<shots;s++){
       var off = shots>1 ? (s-(shots-1)/2)*0.18 : 0;
-      fireBullet(b, angleToTarget+spread+off);
+      beginFire(b, angleToTarget+spread+off);
     }
     b.ammo--;
     b.cooldown = b.def.fireRate*1.5;
     b.idleTimer=0;
   }
 
+  // Reuse the exact same ability logic humans use (see triggerAbilityFor)
+  // instead of a separate duplicated copy, so bots automatically get every
+  // ship's current ability behavior -- including new ones -- for free.
   if(b.abilityCharge>0 && Math.random()<0.006 && bestD<420){
-    b.abilityCharge=0;
-    b.hitStreak=0;
-    b.abilityCd=b.def.ability.cooldown; // visual only now
-    b.abilityActive=b.def.ability.duration;
-    b.idleTimer=0;
-    if(b.def.id==='wraith'){
-      b.x += Math.cos(b.angle)*150; b.y += Math.sin(b.angle)*150;
-      resolveObstacles(b);
-    } else if(b.def.id==='longshot'){
-      fireBullet(b, b.angle, true, false, true);
-    } else if(b.def.id==='swarmer'){
-      for(var f=0;f<12;f++) fireBullet(b,(Math.PI*2/12)*f,false,true,true);
-    } else if(b.def.id==='seraph'){
-      b.hp=Math.min(b.maxHp, b.hp + b.maxHp*0.4);
-    }
+    triggerAbilityFor(b);
   }
 }
 
@@ -2188,13 +2413,28 @@ function updateControlledShip(ent, input, dt, movementOnly){
 
   if(movementOnly) return;
 
+  if(ent.def.beamWeapon){
+    // A beam ship's "shot" is a single 2-second channel that spends the
+    // whole ammo bar at once, not a per-press bullet -- see
+    // updateBeamWeapon for the actual damage-over-time tick.
+    if(input.fireOn && ent.beamActive<=0 && ent.ammo>=MAX_AMMO){
+      ent.ammo=0;
+      ent.beamActive=ent.def.beamDuration||2000;
+      ent.beamAngle=ent.angle;
+      ent.beamTickTimer=0;
+      ent.idleTimer=0;
+      if(ent===player) sfxFire();
+    }
+    return;
+  }
+
   var rate=ent.def.fireRate * (boostMul<1.7?1:0.6);
   if(input.fireOn && ent.cooldown<=0 && ent.ammo>0){
     var shots=ent.def.bulletsPerShot||1;
     for(var i=0;i<shots;i++){
       var off = shots>1 ? (i-(shots-1)/2)*0.18 : 0;
       var spread=(ent.def.spread ? (Math.random()-0.5)*ent.def.spread*0.4 : 0);
-      fireBullet(ent, ent.angle+off+spread);
+      beginFire(ent, ent.angle+off+spread);
     }
     ent.ammo--;
     ent.cooldown=rate;
@@ -2283,6 +2523,24 @@ function updateBullets(dt){
             }
             if(!tgt.isPlayer) tgt.respawnTimer = rnd(3000,5000);
           }
+          if(!bl.piercing) removed=true;
+          break;
+        }
+      }
+    }
+
+    // Deputy turrets: any bullet that touches one destroys it outright --
+    // no kill credit, no gem drop, no ability-charge/invincibility bookkeeping,
+    // it's not a "ship" for scoring purposes.
+    if(!removed){
+      for(var tu=0;tu<turrets.length;tu++){
+        var trt=turrets[tu];
+        if(!trt.alive || bulletAlreadyHit(bl,trt)) continue;
+        if(dst(bl.x,bl.y,trt.x,trt.y) < 10+bl.size){
+          trt.alive=false;
+          spawnBurst(trt.x,trt.y,trt.color,10);
+          sfxHit();
+          bl.hitSet.push(trt);
           if(!bl.piercing) removed=true;
           break;
         }
@@ -2390,9 +2648,13 @@ function update(dt){
 
   updateAmmoRegen(player, dt);
   updatePlayer(dt);
+  updateBurstFire(player, dt);
+  updateBeamWeapon(player, dt);
   if(remotePlayer){
     updateAmmoRegen(remotePlayer, dt);
     updateRemoteGuestShip(dt);
+    updateBurstFire(remotePlayer, dt);
+    updateBeamWeapon(remotePlayer, dt);
   }
   for(var i=0;i<bots.length;i++){ if(bots[i].alive) updateBotAI(bots[i],dt); }
   for(var i=0;i<bots.length;i++){
@@ -2411,14 +2673,18 @@ function update(dt){
     if(b.abilityActive>0) b.abilityActive -= dt;
     if(b.invincible>0) b.invincible -= dt;
     updateAmmoRegen(b, dt);
+    updateBurstFire(b, dt);
+    updateBeamWeapon(b, dt);
     b.x += b.vx*(dt/16.67); b.y += b.vy*(dt/16.67);
     resolveObstacles(b);
     b.trail.push({x:b.x,y:b.y});
     if(b.trail.length>16) b.trail.shift();
   }
   updateBullets(dt);
+  updateTurrets(dt);
   updateGems(dt);
   updateShieldStation(dt);
+  updateTractorPull(dt);
   updateIdleRegen(dt);
   updateParticles(dt);
   updateCamera(dt);
@@ -2501,6 +2767,9 @@ function drawShipShape(e){
   } else if(e.def.id==='swarmer'){
     ctx.moveTo(18,0); ctx.lineTo(-4,10); ctx.lineTo(-16,16); ctx.lineTo(-8,0);
     ctx.lineTo(-16,-16); ctx.lineTo(-4,-10); ctx.closePath();
+  } else if(e.def.id==='bruiser'){
+    ctx.moveTo(20,0); ctx.lineTo(10,10); ctx.lineTo(-16,10); ctx.lineTo(-20,4);
+    ctx.lineTo(-20,-4); ctx.lineTo(-16,-10); ctx.lineTo(10,-10); ctx.closePath();
   } else {
     ctx.moveTo(20,0); ctx.lineTo(0,8); ctx.lineTo(-14,6); ctx.lineTo(-8,0);
     ctx.lineTo(-14,-6); ctx.lineTo(0,-8); ctx.closePath();
@@ -2511,6 +2780,16 @@ function drawShipShape(e){
   if(e.def.id==='vanguard' && e.boosted>0){
     ctx.strokeStyle='rgba(255,255,255,0.6)';
     ctx.beginPath(); ctx.arc(0,0,26,0,Math.PI*2); ctx.stroke();
+  }
+  if(e.def.id==='bruiser' && e.abilityActive>0){
+    // tractor pull -- faint pulsing ring showing the active pull radius
+    var pr=(e.def.ability.pullRange||350)*(0.94+0.06*Math.sin(performance.now()*0.01));
+    ctx.save();
+    ctx.rotate(-e.angle); // ring should stay screen-fixed, not spin with the hull
+    ctx.strokeStyle='rgba(255,85,0,0.25)'; ctx.lineWidth=2; ctx.setLineDash([8,10]);
+    ctx.beginPath(); ctx.arc(0,0,pr,0,Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
   }
   ctx.restore();
 
@@ -2575,6 +2854,7 @@ function drawWorld(){
   drawShieldStation();
 
   for(var i=0;i<gems.length;i++) drawGem(gems[i]);
+  for(var i=0;i<turrets.length;i++){ if(turrets[i].alive) drawTurret(turrets[i]); }
 
   for(var i=0;i<particles.length;i++){
     var p=particles[i];
@@ -2599,10 +2879,28 @@ function drawWorld(){
   }
   ctx.shadowBlur=0;
 
+  for(var i=0;i<bots.length;i++){ if(bots[i].alive && bots[i].beamActive>0) drawBeam(bots[i]); }
+  if(remotePlayer && remotePlayer.alive && remotePlayer.beamActive>0) drawBeam(remotePlayer);
+  if(player.alive && player.beamActive>0) drawBeam(player);
+
   for(var i=0;i<bots.length;i++){ if(bots[i].alive) drawShipShape(bots[i]); }
   if(remotePlayer && remotePlayer.alive) drawShipShape(remotePlayer);
   if(player.alive) drawShipShape(player);
 
+  ctx.restore();
+}
+function drawBeam(e){
+  var range = e.beamRangeNow || e.def.beamRange;
+  var ex=e.x+Math.cos(e.beamAngle)*range, ey=e.y+Math.sin(e.beamAngle)*range;
+  ctx.save();
+  ctx.strokeStyle=e.def.color;
+  ctx.shadowColor=e.def.color; ctx.shadowBlur=18;
+  ctx.lineCap='round';
+  ctx.lineWidth=7; ctx.globalAlpha=0.35;
+  ctx.beginPath(); ctx.moveTo(e.x,e.y); ctx.lineTo(ex,ey); ctx.stroke();
+  ctx.lineWidth=3; ctx.globalAlpha=0.9;
+  ctx.beginPath(); ctx.moveTo(e.x,e.y); ctx.lineTo(ex,ey); ctx.stroke();
+  ctx.globalAlpha=1; ctx.shadowBlur=0;
   ctx.restore();
 }
 
@@ -2621,6 +2919,11 @@ function drawMinimap(){
   }
   mx.fillStyle='rgba(80,255,180,0.85)';
   mx.beginPath(); mx.arc(shieldStation.x*scaleX,shieldStation.y*scaleY,3.5,0,Math.PI*2); mx.fill();
+  for(var i=0;i<turrets.length;i++){
+    var trt=turrets[i]; if(!trt.alive) continue;
+    mx.fillStyle=trt.color;
+    mx.beginPath(); mx.arc(trt.x*scaleX,trt.y*scaleY,1.5,0,Math.PI*2); mx.fill();
+  }
   for(var i=0;i<bots.length;i++){
     var b=bots[i]; if(!b.alive) continue;
     mx.fillStyle=b.def.color;
