@@ -546,7 +546,7 @@ function resolveObstacles(ent){
    capped at that ship's own max HP. Relocates on every new game.
 ===================================================================== */
 var shieldStation={x:0, y:0, r:70, pulse:0};
-var SHIELD_HEAL_RATE=0.014; // fraction of max HP healed per second while in range
+var SHIELD_HEAL_RATE=0.060; // fraction of max HP healed per second while in range (2x the full-idle rate below)
 
 function placeShieldStation(){
   var x,y,ok,tries=0;
@@ -579,12 +579,16 @@ function updateShieldStation(dt){
 }
 
 /* =====================================================================
-   IDLE REGEN -- a ship that hasn't fired or thrusted for a short while
-   slowly regenerates shield/HP on its own, anywhere on the map. Firing
-   or thrusting resets the idle timer. Stacks with the shield station.
+   IDLE REGEN -- a ship that hasn't fired for a short while slowly
+   regenerates shield/HP on its own, anywhere on the map, at one of two
+   rates: full speed while completely still, half speed while flying
+   around without firing. Only firing resets the timer/interrupts it --
+   thrusting no longer blocks regen, just halves it. Stacks with the
+   shield station.
 ===================================================================== */
-var IDLE_REGEN_DELAY=2500;   // ms of no firing/thrusting before regen kicks in
-var IDLE_REGEN_RATE=0.010;   // fraction of max HP healed per second once idle
+var IDLE_REGEN_DELAY=1000;    // ms since the last shot fired before regen kicks in
+var IDLE_REGEN_RATE=0.030;    // fraction of max HP healed per second while fully still
+var FLYING_REGEN_RATE=0.015;  // fraction of max HP healed per second while thrusting but not firing
 
 function updateIdleRegen(dt){
   var all=allShips();
@@ -593,7 +597,8 @@ function updateIdleRegen(dt){
     if(!e.alive) continue;
     e.idleTimer += dt;
     if(e.hp<e.maxHp && e.idleTimer>=IDLE_REGEN_DELAY){
-      e.hp = Math.min(e.maxHp, e.hp + e.maxHp*IDLE_REGEN_RATE*(dt/1000));
+      var rate = e.thrusting ? FLYING_REGEN_RATE : IDLE_REGEN_RATE;
+      e.hp = Math.min(e.maxHp, e.hp + e.maxHp*rate*(dt/1000));
     }
   }
 }
@@ -1253,7 +1258,8 @@ function makeShipEntity(def,x,y,isPlayer){
     aiState:'seek', // 'seek' | 'flee' | 'steal-flee' -- dynamic per-frame role
     carryingGems:0, // number of stolen gems this bot holds
     respawnTimer:0,
-    idleTimer:0, // ms since last fired or thrusted -- drives passive idle regen
+    idleTimer:0, // ms since last fired -- drives passive idle/flying regen
+    thrusting:false, // true this frame if applying thrust -- halves the idle regen rate
     ammo:MAX_AMMO, ammoRegenTimer:0, // limited-shot pool, regenerates over time
     abilityCharge:1, hitStreak:0 // ability starts charged; recharges via 3 landed hits
   };
@@ -1975,6 +1981,7 @@ function nearestThreatHuman(b){
 
 function updateBotAI(b, dt){
   b.aiDecisionTimer -= dt;
+  b.thrusting=false;
   var threat=nearestThreatHuman(b);
   var threatEnt=threat.ent;
   var distToPlayer=threat.dist;
@@ -2014,7 +2021,7 @@ function updateBotAI(b, dt){
 
     b.vx += Math.cos(awayAngle)*0.16;
     b.vy += Math.sin(awayAngle)*0.16;
-    b.idleTimer=0;
+    b.thrusting=true;
     b.vx *= b.def.drag; b.vy *= b.def.drag;
     var sp1=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
     var maxSp1=b.def.maxSpeed*0.85;
@@ -2039,7 +2046,7 @@ function updateBotAI(b, dt){
     b.angle += da2*0.10;
     b.vx += Math.cos(b.angle)*0.15;
     b.vy += Math.sin(b.angle)*0.15;
-    b.idleTimer=0;
+    b.thrusting=true;
     b.vx *= b.def.drag; b.vy *= b.def.drag;
     var sp2=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
     var maxSp2=b.def.maxSpeed*0.8;
@@ -2086,7 +2093,7 @@ function updateBotAI(b, dt){
   if(thrustAngleDiff < Math.PI/2){
     b.vx += Math.cos(b.angle)*0.14;
     b.vy += Math.sin(b.angle)*0.14;
-    b.idleTimer=0;
+    b.thrusting=true;
   }
   b.vx *= b.def.drag; b.vy *= b.def.drag;
   var sp=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
@@ -2158,10 +2165,10 @@ function updateControlledShip(ent, input, dt, movementOnly){
   var effThrust = ent.eff ? ent.eff.thrustPower : ent.def.thrustPower;
   var effMaxSpeed = ent.eff ? ent.eff.maxSpeed : ent.def.maxSpeed;
 
+  ent.thrusting = !!input.thrustOn;
   if(input.thrustOn){
     ent.vx += Math.cos(ent.angle)*effThrust*boostMul*(dt/16.67);
     ent.vy += Math.sin(ent.angle)*effThrust*boostMul*(dt/16.67);
-    ent.idleTimer=0;
     if(ent.isPlayer && ent===player){
       var now=performance.now();
       if(now-lastThrustSfx>220){ sfxThrust(); lastThrustSfx=now; }
