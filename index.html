@@ -29,6 +29,8 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 #shieldBar{width:120px;height:8px;background:rgba(0,212,255,0.15);border-radius:4px;border:1px solid rgba(0,212,255,0.3);overflow:hidden;margin-top:3px;}
 #shieldFill{height:100%;background:#00d4ff;border-radius:4px;transition:width 0.2s,background 0.3s;}
 #shieldFill.danger{background:#ff4444;}
+#bonusShieldBar{width:120px;height:5px;background:rgba(255,176,32,0.12);border-radius:3px;border:1px solid rgba(255,176,32,0.35);overflow:hidden;margin-top:3px;}
+#bonusShieldFill{height:100%;background:#ffb020;border-radius:3px;transition:width 0.2s;}
 
 /* Minimap */
 #minimap{position:fixed;top:10px;left:50%;margin-left:-70px;width:140px;height:105px;background:rgba(0,5,15,0.85);border:1px solid rgba(0,212,255,0.25);border-radius:6px;z-index:20;overflow:hidden;}
@@ -104,6 +106,8 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 #shipDetail{margin-top:14px;width:100%;max-width:520px;border:1px solid rgba(0,212,255,0.2);border-left:3px solid #00d4ff;background:rgba(10,20,35,0.8);border-radius:8px;padding:12px 14px;font-size:11.5px;color:rgba(200,220,240,0.85);line-height:1.5;min-height:50px;}
 #gemBankRow{font-size:10px;letter-spacing:2px;color:#66eaff;text-shadow:0 0 8px rgba(102,234,255,0.5);margin-bottom:12px;display:flex;align-items:center;gap:5px;}
 #gemBankRow .gicon{font-size:12px;}
+#bucksBankRow{font-size:10px;letter-spacing:2px;color:#ffb020;text-shadow:0 0 8px rgba(255,176,32,0.5);margin-bottom:12px;margin-top:-6px;display:flex;align-items:center;gap:5px;}
+#bucksBankRow .gicon{font-size:12px;font-weight:800;}
 
 /* Ship upgrade popup */
 #upgradeModalOverlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.65);z-index:95;display:none;align-items:center;justify-content:center;padding:16px;}
@@ -124,6 +128,25 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 #hangarActions{display:flex;flex-direction:column;align-items:center;margin-top:18px;margin-bottom:24px;}
 #launchBtn{background:rgba(0,212,255,0.1);border:2px solid #00d4ff;color:#00d4ff;font-family:‘Orbitron’,monospace;font-weight:800;letter-spacing:3px;font-size:15px;padding:13px 40px;border-radius:8px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
 #inviteFriendBtn{margin-top:10px;background:transparent;border:1px solid rgba(0,212,255,0.4);color:#66eaff;font-family:inherit;font-weight:700;letter-spacing:2px;font-size:10px;padding:9px 22px;border-radius:6px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+#spaceStationBtn{margin-bottom:10px;background:rgba(255,176,32,0.08);border:1.5px solid #ffb020;color:#ffb020;font-family:inherit;font-weight:800;letter-spacing:2px;font-size:11px;padding:9px 20px;border-radius:6px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+#nextBattleRow{margin-top:8px;font-size:9.5px;letter-spacing:1px;color:#ffb020;display:flex;align-items:center;gap:8px;}
+#clearPendingUpgradeBtn{background:transparent;border:1px solid rgba(255,176,32,0.5);color:#ffb020;border-radius:50%;width:16px;height:16px;line-height:1;font-size:9px;cursor:pointer;-webkit-tap-highlight-color:transparent;padding:0;}
+
+/* Space Station -- one-battle upgrade shop */
+#spaceStationOverlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.65);z-index:95;display:none;align-items:center;justify-content:center;padding:16px;}
+#spaceStationOverlay.show{display:flex;}
+#spaceStationCard{background:rgba(0,10,24,0.98);border:1px solid rgba(255,176,32,0.35);border-radius:14px;padding:22px 22px 20px;max-width:380px;width:100%;position:relative;}
+#spaceStationCard h2{font-size:14px;letter-spacing:2px;margin-bottom:2px;text-align:center;color:#ffb020;}
+#spaceStationSub{text-align:center;font-size:9.5px;color:rgba(150,180,220,0.6);letter-spacing:0.5px;margin-bottom:12px;line-height:1.4;}
+#closeSpaceStation{position:absolute;top:13px;right:15px;background:transparent;border:none;color:rgba(255,176,32,0.55);font-size:19px;cursor:pointer;line-height:1;-webkit-tap-highlight-color:transparent;}
+#spaceStationBucksRow{text-align:center;font-size:11px;letter-spacing:2px;color:#ffb020;text-shadow:0 0 10px rgba(255,176,32,0.5);margin-bottom:14px;}
+#spaceStationButtons{display:flex;flex-direction:column;gap:9px;}
+.stationBtn{display:flex;flex-direction:column;width:100%;background:rgba(255,176,32,0.06);border:1px solid rgba(255,176,32,0.35);border-radius:6px;color:#ffb020;font-family:inherit;text-align:left;padding:10px 12px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+.stationBtn:disabled{opacity:0.35;cursor:default;}
+.stationBtn .stationBtnTop{display:flex;justify-content:space-between;align-items:center;font-size:10.5px;letter-spacing:1px;font-weight:800;}
+.stationBtn .cost{color:#66eaff;font-size:9px;white-space:nowrap;}
+.stationBtn .stationBtnDesc{font-size:9px;color:rgba(200,220,240,0.7);letter-spacing:0.3px;margin-top:4px;line-height:1.35;}
+.stationBtn.active{border-color:#44ff88;background:rgba(68,255,136,0.08);}
 
 /* Invite / join multiplayer UI */
 #inviteModalOverlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.65);z-index:96;display:none;align-items:center;justify-content:center;padding:16px;}
@@ -172,6 +195,8 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
   <div id="hudLeft">
     <div class="hud-lbl">SHIELD</div>
     <div id="shieldBar"><div id="shieldFill" style="width:100%"></div></div>
+    <div id="bonusShieldBar" style="display:none;"><div id="bonusShieldFill" style="width:100%"></div></div>
+    <div id="cloakStatus" style="display:none;font-size:9px;letter-spacing:2px;color:#b060ff;text-shadow:0 0 8px rgba(176,96,255,0.7);margin-top:4px;">CLOAKED</div>
     <div class="hud-lbl" style="margin-top:6px;">SHIP</div>
     <div class="hud-val" id="shipNameVal" style="font-size:13px;">-</div>
     <div class="hud-lbl" id="gemLbl" style="margin-top:6px;">GEMS</div>
@@ -249,6 +274,7 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
     <button class="modeToggleBtn" id="modeWarpBtn">WARP CORE</button>
   </div>
   <div id="gemBankRow"><span class="gicon">&#9670;</span>HANGAR CHEST: <span id="gemBankVal">0</span> GEMS</div>
+  <div id="bucksBankRow"><span class="gicon">$</span>GALACTIC BUCKS: <span id="bucksBankVal">0</span></div>
   <div id="carousel">
     <button id="carouselLeftBtn" class="carouselArrow" aria-label="Previous ship">&#10094;</button>
     <div id="carouselTrack">
@@ -259,9 +285,24 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
     <button id="carouselRightBtn" class="carouselArrow" aria-label="Next ship">&#10095;</button>
   </div>
   <div id="shipDetail">Select a ranger to view dossier.</div>
+  <div id="nextBattleRow" style="display:none;">
+    NEXT BATTLE: <span id="nextBattleVal"></span>
+    <button id="clearPendingUpgradeBtn" aria-label="Cancel pending upgrade">&#10005;</button>
+  </div>
   <div id="hangarActions">
+    <button id="spaceStationBtn">&#9737; SPACE STATION</button>
     <button id="launchBtn">LAUNCH</button>
     <button id="inviteFriendBtn">&#9670; INVITE FRIEND</button>
+  </div>
+</div>
+
+<div id="spaceStationOverlay">
+  <div id="spaceStationCard">
+    <button id="closeSpaceStation">X</button>
+    <h2>SPACE STATION</h2>
+    <div id="spaceStationSub">One-battle upgrades -- applied to whatever ship you launch next.</div>
+    <div id="spaceStationBucksRow">BALANCE: $<span id="spaceStationBucksVal">0</span> Galactic Bucks</div>
+    <div id="spaceStationButtons"></div>
   </div>
 </div>
 
@@ -390,10 +431,12 @@ var SHIPS = [
 var SAVE_KEY='spaceRangersArenaProgress_v2';
 var LEGACY_SAVE_KEY='spaceRangersArenaProgress_v1';
 var GEMS_PER_UPGRADE=10;
+var GALACTIC_BUCKS_PER_WIN=5; // awarded for winning a Warp Core match
+var SPACE_STATION_UPGRADE_COST=25;
 var progress=null;
 
 function defaultProgress(){
-  var p={bank:0, ships:{}};
+  var p={bank:0, ships:{}, galacticBucks:0, pendingUpgrade:null};
   for(var i=0;i<SHIPS.length;i++){
     p.ships[SHIPS[i].id]={speedLvl:0, damageLvl:0, shieldLvl:0};
   }
@@ -425,6 +468,8 @@ function loadProgress(){
   }catch(e){ p=null; }
   if(!p) p=defaultProgress();
   if(typeof p.bank!=='number') p.bank=0;
+  if(typeof p.galacticBucks!=='number') p.galacticBucks=0;
+  if(p.pendingUpgrade===undefined) p.pendingUpgrade=null;
   if(!p.ships) p.ships={};
   // Fill in any ships missing from an older/partial save
   for(var i=0;i<SHIPS.length;i++){
@@ -691,8 +736,9 @@ function updateNebulaStatus(dt){
   for(var i=0;i<all.length;i++){
     var e=all[i];
     if(!e.alive) continue;
-    e.concealed = !!inAnyNebula(e);
+    e.concealed = !!inAnyNebula(e) || e.cloakTimer>0;
     if(e.revealTimer>0) e.revealTimer -= dt;
+    if(e.cloakTimer>0) e.cloakTimer -= dt;
   }
 }
 // Whether the LOCAL viewer (this client's own `player`) can currently see
@@ -871,6 +917,18 @@ function dropCarriedCores(ent){
   }
   ent.carryingCores=[];
 }
+// Shared damage-application path for every damage source (bullets, beam,
+// gas clouds) -- drains a Space Station Perma-shield bonus HP pool first,
+// then the remainder comes off real hp.
+function applyDamage(tgt, amount){
+  if(amount<=0) return;
+  if(tgt.bonusShieldHp>0){
+    var absorb=Math.min(tgt.bonusShieldHp, amount);
+    tgt.bonusShieldHp -= absorb;
+    amount -= absorb;
+  }
+  tgt.hp -= amount;
+}
 
 /* =====================================================================
    GAS CLOUDS -- Nebula ship's regular weapon. Each trigger pull spawns one
@@ -929,7 +987,7 @@ function updateGasClouds(dt){
       if(doTick){
         var mult=1+Math.min(exp.ms/(GAS_RAMP_SEC*1000),1)*(GAS_RAMP_MAX_MULT-1);
         var dmg=c.baseDPS*(GAS_TICK_MS/1000)*mult;
-        e.hp -= dmg;
+        applyDamage(e, dmg);
         spawnBurst(e.x,e.y,'#b060ff',4);
         sfxHit();
         if(e.hp<=0 && e.alive){
@@ -1642,11 +1700,27 @@ function updateDetail(){
   document.getElementById('launchBtn').style.borderColor=selectedShip.color;
   document.getElementById('launchBtn').style.color=selectedShip.color;
   updateGemBankDisplay();
+  updateBucksBankDisplay();
+  updateNextBattleRow();
 }
 
 function updateGemBankDisplay(){
   var el=document.getElementById('gemBankVal');
   if(el) el.textContent=progress.bank;
+}
+function updateBucksBankDisplay(){
+  var el=document.getElementById('bucksBankVal');
+  if(el) el.textContent=progress.galacticBucks;
+}
+function updateNextBattleRow(){
+  var row=document.getElementById('nextBattleRow');
+  var upg=SPACE_STATION_UPGRADES.filter(function(u){ return u.id===progress.pendingUpgrade; })[0];
+  if(upg){
+    row.style.display='flex';
+    document.getElementById('nextBattleVal').textContent=upg.name;
+  } else {
+    row.style.display='none';
+  }
 }
 
 /* =====================================================================
@@ -1708,6 +1782,94 @@ function refreshUpgradeModal(){
 }
 document.getElementById('closeUpgradeModal').addEventListener('click', closeUpgradeModal);
 document.getElementById('upgradeModalOverlay').addEventListener('click',function(e){ if(e.target===this) closeUpgradeModal(); });
+
+/* =====================================================================
+   SPACE STATION -- spend Galactic Bucks (earned from Warp Core wins) on
+   one powerful one-battle upgrade. Only one can be pending at a time;
+   buying another replaces it. Applied to whichever ship is selected at
+   LAUNCH next (either mode), then consumed -- see applyPendingUpgrade,
+   called from startGame/startWarpCoreGame.
+===================================================================== */
+var SPACE_STATION_UPGRADES=[
+  {id:'destructo', name:'DESTRUCTO MISSILE', desc:'Your first shot next battle deals 99% damage to whatever it hits, leaving it at just 1% hull.'},
+  {id:'shield', name:'EXTRA PERMA-SHIELD', desc:'A bonus shield pool worth 50% of your max hull for the first 60 seconds of next battle.'},
+  {id:'cloak', name:'CLOAK', desc:'Concealed like a nebula cloud for the first 60 seconds of next battle -- hidden unless someone gets close or you fire.'},
+  {id:'deputy', name:'DEPUTY', desc:'An indestructible drone deploys with you and locks onto an enemy for 60 seconds, dealing more damage the longer it stays locked.'}
+];
+function openSpaceStation(){
+  document.getElementById('spaceStationOverlay').classList.add('show');
+  refreshSpaceStation();
+}
+function closeSpaceStation(){
+  document.getElementById('spaceStationOverlay').classList.remove('show');
+}
+function refreshSpaceStation(){
+  document.getElementById('spaceStationBucksVal').textContent=progress.galacticBucks;
+  var wrap=document.getElementById('spaceStationButtons');
+  wrap.innerHTML='';
+  for(var i=0;i<SPACE_STATION_UPGRADES.length;i++){
+    (function(u){
+      var active = progress.pendingUpgrade===u.id;
+      var btn=document.createElement('button');
+      btn.className='stationBtn'+(active?' active':'');
+      btn.disabled = !active && progress.galacticBucks < SPACE_STATION_UPGRADE_COST;
+      btn.innerHTML='<span class="stationBtnTop"><span>'+u.name+(active?' -- ACTIVE':'')+'</span><span class="cost">$'+SPACE_STATION_UPGRADE_COST+'</span></span><span class="stationBtnDesc">'+u.desc+'</span>';
+      btn.addEventListener('click', function(){
+        if(active) return; // already queued, nothing to do
+        if(progress.pendingUpgrade && !confirm('Replace your queued "'+SPACE_STATION_UPGRADES.filter(function(x){return x.id===progress.pendingUpgrade;})[0].name+'" upgrade with '+u.name+'?')) return;
+        if(purchaseSpaceStationUpgrade(u.id)){
+          showAlert(u.name+' READY FOR NEXT BATTLE', 2400);
+          refreshSpaceStation();
+          updateBucksBankDisplay();
+          updateNextBattleRow();
+        }
+      });
+      wrap.appendChild(btn);
+    })(SPACE_STATION_UPGRADES[i]);
+  }
+}
+// Spends SPACE_STATION_UPGRADE_COST bucks and queues `upgradeId` as the
+// pending upgrade (replacing any that was already queued). Returns true on
+// success (false if the chest doesn't have enough).
+function purchaseSpaceStationUpgrade(upgradeId){
+  if(progress.galacticBucks < SPACE_STATION_UPGRADE_COST) return false;
+  progress.galacticBucks -= SPACE_STATION_UPGRADE_COST;
+  progress.pendingUpgrade=upgradeId;
+  saveProgress();
+  return true;
+}
+// Consumes progress.pendingUpgrade (if any) and applies its effect to
+// `ent` (always the local human player) at the start of a match. Called
+// once from both startGame() and startWarpCoreGame(), gated solo-only by
+// the caller -- never applies to a connected guest's ship.
+function applyPendingUpgrade(ent){
+  var upgradeId=progress.pendingUpgrade;
+  if(!upgradeId) return;
+  progress.pendingUpgrade=null;
+  saveProgress();
+  if(upgradeId==='destructo'){
+    ent.destructoPending=true;
+    showAlert('DESTRUCTO MISSILE LOADED', 2200);
+  } else if(upgradeId==='shield'){
+    ent.bonusShieldHp=ent.maxHp*0.5;
+    ent.bonusShieldTimer=60000;
+    showAlert('PERMA-SHIELD ONLINE', 2200);
+  } else if(upgradeId==='cloak'){
+    ent.cloakTimer=60000;
+    showAlert('CLOAK ENGAGED', 2200);
+  } else if(upgradeId==='deputy'){
+    spawnDeputyDrone(ent);
+    showAlert('DEPUTY DRONE DEPLOYED', 2200);
+  }
+}
+document.getElementById('spaceStationBtn').addEventListener('click', openSpaceStation);
+document.getElementById('closeSpaceStation').addEventListener('click', closeSpaceStation);
+document.getElementById('spaceStationOverlay').addEventListener('click',function(e){ if(e.target===this) closeSpaceStation(); });
+document.getElementById('clearPendingUpgradeBtn').addEventListener('click',function(){
+  progress.pendingUpgrade=null;
+  saveProgress();
+  updateNextBattleRow();
+});
 
 var cardT=0;
 function animateCards(){
@@ -1842,7 +2004,10 @@ function makeShipEntity(def,x,y,isPlayer){
     anchoredTimer:0, // Deadeye's Anchor debuff: >0 while this ship's max speed is halved
     concealed:false, revealTimer:0, // nebula cloud concealment state
     team:null, // 'A'|'B' in Warp Core mode; unused (always null) in Battle Arena
-    carryingCores:[] // Warp Core mode: warp cores this ship is currently holding
+    carryingCores:[], // Warp Core mode: warp cores this ship is currently holding
+    destructoPending:false, // Space Station: next bullet fired is a Destructo Missile
+    bonusShieldHp:0, bonusShieldTimer:0, // Space Station: Extra Perma-shield bonus pool
+    cloakTimer:0 // Space Station: Cloak -- forces `concealed` regardless of nebula position
   };
 }
 
@@ -1889,17 +2054,20 @@ function fireBullet(owner, angle, forcePierce, isFlak, isAbilityShot){
   var dmg = (owner.isPlayer && owner.eff) ? owner.eff.bulletDamage : def.bulletDamage;
   if(inAnyNebula(owner)) dmg *= 2; // firing from inside a nebula cloud doubles shot damage
   owner.revealTimer = NEBULA_FIRED_REVEAL_MS; // firing briefly reveals a concealed shooter
+  var isDestructo = !!(owner===player && owner.destructoPending);
+  if(isDestructo) owner.destructoPending=false; // only the very first shot fired is the missile
   bullets.push({
     x: owner.x + Math.cos(angle)*22,
     y: owner.y + Math.sin(angle)*22,
     vx: Math.cos(angle)*def.bulletSpeed,
     vy: Math.sin(angle)*def.bulletSpeed,
     life: isFlak ? 500 : def.bulletLife,
-    color: def.color, size: def.piercing?5:3.2,
+    color: isDestructo ? '#ff0044' : def.color, size: def.piercing?5:3.2,
     damage: dmg, owner: owner,
     piercing: forcePierce || def.piercing || false,
     hitSet: [],
     isAbilityShot: !!isAbilityShot,
+    isDestructoMissile: isDestructo,
     comboEligible: !!def.comboDamage, comboTracker: owner,
     homing: !!def.homing, homingTarget: null, homingTurnRate: def.homingTurnRate||0.05, homingRange: def.homingRange||500
   });
@@ -1974,7 +2142,7 @@ function updateBeamWeapon(ent, dt){
     if(tgt===ent || !tgt.alive || tgt.invincible>0 || !isEnemyOf(ent,tgt)) continue;
     if(distPointToSegment(tgt.x,tgt.y, ent.x,ent.y, ex,ey) > tgt.r+6) continue;
 
-    tgt.hp -= tickDamage;
+    applyDamage(tgt, tickDamage);
     spawnBurst(tgt.x,tgt.y,ent.def.color,3);
     sfxHit();
 
@@ -2177,6 +2345,19 @@ function spawnTurret(ownerEnt){
     color:ownerEnt.def.color, ownerEnt:ownerEnt, fireTimer:0, comboStreak:0
   });
 }
+// Space Station "Deputy" upgrade: an indestructible drone that follows its
+// owner, locks onto one enemy at a time, and ramps its damage the longer
+// that lock holds. Reuses the same `turrets` array/update/draw path as
+// Seraph's plain deputy turret -- the extra fields (`indestructible`,
+// `followOwner`, `lockedTarget`, `lockMs`, `life`) are what distinguish it.
+function spawnDeputyDrone(ownerEnt){
+  turrets.push({
+    x:ownerEnt.x, y:ownerEnt.y, angle:ownerEnt.angle, alive:true,
+    color:'#ffb020', ownerEnt:ownerEnt, fireTimer:0, comboStreak:0,
+    indestructible:true, followOwner:ownerEnt, orbitAngle:0,
+    lockedTarget:null, lockMs:0, life:60000
+  });
+}
 // Nearest living ship to this turret, excluding whoever summoned it.
 function nearestEnemyOfTurret(t){
   var all=allShips(), best=null, bestD=Infinity;
@@ -2193,6 +2374,10 @@ function nearestEnemyOfTurret(t){
 // kill-crediting and gem drops work exactly like every other ability shot.
 function fireDeputyBullet(t, angle){
   var dmg = inAnyNebula(t) ? 2 : 1; // turret sitting in a cloud also hits twice as hard
+  if(t.lockedTarget!==undefined){ // Space Station Deputy drone: ramps up the longer its lock holds
+    var lockMult = 1+Math.min(t.lockMs/(20*1000),1)*3; // 1x at acquire, up to 4x after 20s locked
+    dmg *= lockMult;
+  }
   bullets.push({
     x:t.x+Math.cos(angle)*14, y:t.y+Math.sin(angle)*14,
     vx:Math.cos(angle)*9, vy:Math.sin(angle)*9,
@@ -2205,7 +2390,29 @@ function updateTurrets(dt){
   for(var i=turrets.length-1;i>=0;i--){
     var t=turrets[i];
     if(!t.alive){ turrets.splice(i,1); continue; }
-    var target=nearestEnemyOfTurret(t);
+    if(t.followOwner){
+      if(!t.followOwner.alive){ turrets.splice(i,1); continue; }
+      t.orbitAngle = (t.orbitAngle||0) + dt*0.002; // orbits its owner instead of staying put
+      t.x = t.followOwner.x + Math.cos(t.orbitAngle)*40;
+      t.y = t.followOwner.y + Math.sin(t.orbitAngle)*40;
+    }
+    if(t.life!==undefined){
+      t.life -= dt;
+      if(t.life<=0){ turrets.splice(i,1); continue; }
+    }
+    var target;
+    if(t.lockedTarget!==undefined){ // Deputy drone: keeps one lock, ramping damage, instead of always-nearest
+      if(t.lockedTarget && t.lockedTarget.alive && isDetectableBy(t,t.lockedTarget)){
+        target=t.lockedTarget;
+        t.lockMs += dt;
+      } else {
+        target = nearestEnemyOfTurret(t);
+        t.lockedTarget = target;
+        t.lockMs = 0;
+      }
+    } else {
+      target = nearestEnemyOfTurret(t);
+    }
     if(target){
       t.angle=angTo(t.x,t.y,target.x,target.y);
       t.fireTimer -= dt;
@@ -2220,11 +2427,16 @@ function drawTurret(t){
   ctx.save();
   ctx.translate(t.x,t.y);
   ctx.rotate(t.angle);
-  ctx.shadowColor=t.color; ctx.shadowBlur=8;
-  ctx.strokeStyle=t.color; ctx.fillStyle='rgba(0,10,20,0.85)'; ctx.lineWidth=1.5;
+  ctx.shadowColor=t.color; ctx.shadowBlur = t.indestructible ? 14 : 8;
+  ctx.strokeStyle=t.color; ctx.fillStyle='rgba(0,10,20,0.85)'; ctx.lineWidth = t.indestructible ? 2.5 : 1.5;
   ctx.beginPath();
   ctx.moveTo(8,0); ctx.lineTo(-6,5); ctx.lineTo(-6,-5); ctx.closePath();
   ctx.fill(); ctx.stroke();
+  if(t.indestructible){
+    ctx.beginPath();
+    ctx.arc(0,0,11,0,Math.PI*2);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -2636,6 +2848,7 @@ function startGame(){
   bots=[]; bullets=[]; particles=[]; gems=[]; turrets=[]; gasClouds=[]; killCount=0;
   gemsCollectedThisMatch=0;
   remotePlayer=null;
+  if(!netRole) applyPendingUpgrade(player); // Space Station upgrades are solo-only (after array resets so a spawned Deputy Drone survives)
   lastGuestInput={turnLeft:false, turnRight:false, thrustOn:false, fireOn:false};
 
   document.getElementById('shipNameVal').textContent=selectedShip.name;
@@ -2694,6 +2907,7 @@ function startWarpCoreGame(){
   gemsCollectedThisMatch=0;
   remotePlayer=null;
   lastGuestInput={turnLeft:false, turnRight:false, thrustOn:false, fireOn:false};
+  if(!netRole) applyPendingUpgrade(player); // Space Station upgrades are solo-only (after array resets so a spawned Deputy Drone survives)
 
   document.getElementById('shipNameVal').textContent=selectedShip.name;
   document.getElementById('shipNameVal').style.color=selectedShip.color;
@@ -2769,8 +2983,10 @@ function endGame(won, reason, customTitle, customSub){
     t.textContent=customTitle; t.style.color='#66eaff';
     s.textContent=customSub||'';
   } else if(reason==='warpcoreWon'){
+    progress.galacticBucks += GALACTIC_BUCKS_PER_WIN;
+    saveProgress();
     t.textContent='CORES SECURED'; t.style.color='#44ff88';
-    s.textContent='Your team delivered all 3 warp cores home first!';
+    s.textContent='Your team delivered all 3 warp cores home first! +$'+GALACTIC_BUCKS_PER_WIN+' Galactic Bucks';
   } else if(reason==='warpcoreLost'){
     t.textContent='OUTRUN'; t.style.color='#ff4444';
     s.textContent='The enemy team delivered their 3 warp cores first.';
@@ -2811,6 +3027,15 @@ function updateHUD(){
   var pct=clamp(player.hp/player.maxHp,0,1);
   document.getElementById('shieldFill').style.width=(pct*100)+'%';
   document.getElementById('shieldFill').className = player.hp<=player.maxHp*0.25 ? 'danger' : '';
+  var bonusBar=document.getElementById('bonusShieldBar');
+  if(player.bonusShieldHp>0){
+    bonusBar.style.display='';
+    var bonusPct=clamp(player.bonusShieldHp/(player.maxHp*0.5),0,1);
+    document.getElementById('bonusShieldFill').style.width=(bonusPct*100)+'%';
+  } else {
+    bonusBar.style.display='none';
+  }
+  document.getElementById('cloakStatus').style.display = player.cloakTimer>0 ? '' : 'none';
   document.getElementById('killVal').textContent=killCount;
   var remaining=0;
   for(var i=0;i<bots.length;i++) if(bots[i].alive) remaining++;
@@ -3222,6 +3447,10 @@ function updateControlledShip(ent, input, dt, movementOnly){
       if(ent.def.id==='vanguard') ent.boosted=ent.abilityActive;
     }
     if(ent.anchoredTimer>0) ent.anchoredTimer -= dt;
+    if(ent.bonusShieldTimer>0){
+      ent.bonusShieldTimer -= dt;
+      if(ent.bonusShieldTimer<=0) ent.bonusShieldHp=0;
+    }
   }
 
   var turnRate=ent.def.turnRate;
@@ -3370,12 +3599,17 @@ function updateBullets(dt){
         if(tgt.invincible>0) continue;
         if(dst(bl.x,bl.y,tgt.x,tgt.y) < tgt.r+bl.size){
           var dmgMult=1;
-          if(bl.comboEligible && bl.comboTracker){
-            dmgMult = Math.pow(2, Math.min(bl.comboTracker.comboStreak,3)); // 1x/2x/4x/8x, capped
-            bl.comboTracker.comboStreak = Math.min(bl.comboTracker.comboStreak+1, 3);
+          if(bl.isDestructoMissile){
+            applyDamage(tgt, tgt.hp*0.99); // 99% of current hp, bypassing combo/nebula multipliers
+            spawnBurst(bl.x,bl.y,bl.color, 30);
+          } else {
+            if(bl.comboEligible && bl.comboTracker){
+              dmgMult = Math.pow(2, Math.min(bl.comboTracker.comboStreak,3)); // 1x/2x/4x/8x, capped
+              bl.comboTracker.comboStreak = Math.min(bl.comboTracker.comboStreak+1, 3);
+            }
+            applyDamage(tgt, bl.damage*dmgMult);
+            spawnBurst(bl.x,bl.y,bl.color, dmgMult>1 ? Math.min(6*dmgMult,36) : 6);
           }
-          tgt.hp -= bl.damage*dmgMult;
-          spawnBurst(bl.x,bl.y,bl.color, dmgMult>1 ? Math.min(6*dmgMult,36) : 6);
           sfxHit();
           bl.hitSet.push(tgt);
           tgt.invincible = 250; // brief post-hit immunity so one bullet can't multi-tick
@@ -3431,7 +3665,7 @@ function updateBullets(dt){
     if(!removed){
       for(var tu=0;tu<turrets.length;tu++){
         var trt=turrets[tu];
-        if(!trt.alive || bulletAlreadyHit(bl,trt)) continue;
+        if(!trt.alive || trt.indestructible || bulletAlreadyHit(bl,trt)) continue;
         if(dst(bl.x,bl.y,trt.x,trt.y) < 10+bl.size){
           trt.alive=false;
           spawnBurst(trt.x,trt.y,trt.color,10);
