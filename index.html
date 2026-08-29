@@ -322,8 +322,9 @@ var SHIPS = [
     hp:95, turnRate:0.075, thrustPower:0.26, maxSpeed:8.6, drag:0.985,
     fireRate:230, bulletSpeed:10.5, bulletDamage:7, bulletLife:1800,
     burstCount:3, burstDelay:70, // each trigger pull fires 3 in a line for the cost of 1 shot
+    comboDamage:true, // consecutive landed hits double in damage, up to 8x
     ability:{name:'PHASE BLINK', icon:'>>', cooldown:8500, duration:1, desc:'Instantly teleports forward, dashing through obstacles and fire.'},
-    desc:'Fragile but relentless. Every trigger pull rattles off a straight line of three rounds for the cost of one shot -- a full clip is nine rounds downrange. Pairs with a short-range teleport to reposition or finish a fleeing bot.'
+    desc:'Fragile but relentless. Every trigger pull rattles off a straight line of three rounds for the cost of one shot -- a full clip is nine rounds downrange. Landing hits back-to-back doubles each successive shot\'s damage, up to 8x. Pairs with a short-range teleport to reposition or finish a fleeing bot.'
   },
   {
     id:'longshot', name:'LONGSHOT', role:'Sniper', color:'#ffb020', rgb:'255,176,32',
@@ -352,6 +353,14 @@ var SHIPS = [
     beamWeapon:true, beamRange:320, beamDPS:32, beamDuration:2000,
     ability:{name:'TRACTOR BEAM', icon:'<<', cooldown:14000, duration:2000, pullRange:350, desc:'Projects a pulsing field that drags every nearby enemy in close and holds them to half speed, no damage of its own -- just sets them up for the beam.'},
     desc:'The slowest, toughest hull in the fleet. Its only weapon is a sustained beam that channels for two full seconds using the entire ammo bar in one commitment -- devastating to anything caught in a straight line, but a long recharge afterward.'
+  },
+  {
+    id:'deadeye', name:'DEADEYE', role:'Homing Gunner', color:'#20ffe0', rgb:'32,255,224',
+    hp:105, turnRate:0.06, thrustPower:0.21, maxSpeed:6.8, drag:0.987,
+    fireRate:520, bulletSpeed:7, bulletDamage:13, bulletLife:2800,
+    homing:true, homingTurnRate:0.05, homingRange:500,
+    ability:{name:'ANCHOR', icon:'#', cooldown:13000, duration:1, range:400, desc:'Locks the nearest enemy ahead with a slowing anchor, cutting its speed in half for 10 seconds.'},
+    desc:'Every round fired curves to chase its target down, so aim just has to be close. Anchor snares the nearest threat in front and halves its speed for ten seconds -- great for running down or pinning a fleeing bot.'
   }
 ];
 
@@ -593,6 +602,87 @@ function updateShieldStation(dt){
       e.hp = Math.min(e.maxHp, e.hp + e.maxHp*SHIELD_HEAL_RATE*(dt/1000));
     }
   }
+}
+
+/* =====================================================================
+   NEBULA CLOUDS -- 2-3 static drifting patches placed once per match.
+   Any ship inside one deals double damage with anything it fires, and is
+   concealed -- both from bot AI targeting and from every OTHER viewer's
+   own screen -- unless the viewer/bot is close enough to see through the
+   haze, or the hidden ship fired recently (revealTimer, a frame-based
+   countdown like every other timer here, not a wall-clock stamp, so it
+   works identically solo and over the host/guest link).
+===================================================================== */
+var nebulaClouds=[];
+var NEBULA_DETECT_RANGE=150; // close enough to see/detect a concealed ship regardless
+var NEBULA_FIRED_REVEAL_MS=2000; // briefly revealed after firing from inside a cloud
+
+function placeNebulaClouds(){
+  nebulaClouds=[];
+  var count=2+rndI(0,1); // 2 or 3 per match
+  var tries=0;
+  while(nebulaClouds.length<count && tries<60){
+    tries++;
+    var r=rnd(160,240);
+    var x=rnd(200+r, WW-200-r), y=rnd(200+r, WH-200-r);
+    if(dst(x,y,WW/2,WH/2) < 260+r) continue; // keep clear of the player start
+    if(dst(x,y,shieldStation.x,shieldStation.y) < shieldStation.r+r+40) continue;
+    var clash=false;
+    for(var i=0;i<obstacles.length;i++){
+      if(circleRectHit(x,y,r+20,obstacles[i])){ clash=true; break; }
+    }
+    if(!clash){
+      for(var i=0;i<nebulaClouds.length;i++){
+        if(dst(x,y,nebulaClouds[i].x,nebulaClouds[i].y) < r+nebulaClouds[i].r+60){ clash=true; break; }
+      }
+    }
+    if(clash) continue;
+    nebulaClouds.push({x:x,y:y,r:r,drift:rnd(0,Math.PI*2)});
+  }
+}
+// The cloud a ship/point currently sits inside, or null.
+function inAnyNebula(ent){
+  for(var i=0;i<nebulaClouds.length;i++){
+    if(dst(ent.x,ent.y,nebulaClouds[i].x,nebulaClouds[i].y) < nebulaClouds[i].r) return nebulaClouds[i];
+  }
+  return null;
+}
+// Nearest cloud to a point regardless of whether inside it -- used by
+// fleeing bots that want to duck into cover.
+function nearestNebula(x,y){
+  var best=null, bestD=Infinity;
+  for(var i=0;i<nebulaClouds.length;i++){
+    var d=dst(x,y,nebulaClouds[i].x,nebulaClouds[i].y);
+    if(d<bestD){ bestD=d; best=nebulaClouds[i]; }
+  }
+  return best;
+}
+// Whether `observer` (a bot or turret, anything with x/y) can currently
+// make out ship/turret `e` -- always true if `e` isn't concealed, else
+// only within close range or shortly after `e` last fired.
+function isDetectableBy(observer, e){
+  if(!e.concealed) return true;
+  if(e.revealTimer>0) return true;
+  return dst(observer.x,observer.y,e.x,e.y) <= NEBULA_DETECT_RANGE;
+}
+// Per-frame concealment bookkeeping for every ship.
+function updateNebulaStatus(dt){
+  var all=allShips();
+  for(var i=0;i<all.length;i++){
+    var e=all[i];
+    if(!e.alive) continue;
+    e.concealed = !!inAnyNebula(e);
+    if(e.revealTimer>0) e.revealTimer -= dt;
+  }
+}
+// Whether the LOCAL viewer (this client's own `player`) can currently see
+// ship `e` on screen/minimap -- evaluated independently on host and guest
+// using each one's own local player position, no extra sync required.
+function isVisibleToViewer(e){
+  if(e===player) return true;
+  if(!e.concealed) return true;
+  if(e.revealTimer>0) return true;
+  return dst(player.x,player.y,e.x,e.y) <= NEBULA_DETECT_RANGE;
 }
 
 /* =====================================================================
@@ -1039,6 +1129,10 @@ function drawShipGlyph(gctx, cx, cy, scale, color, t, shipId){
   } else if(shipId==='bruiser'){
     gctx.moveTo(20,0); gctx.lineTo(10,10); gctx.lineTo(-16,10); gctx.lineTo(-20,4);
     gctx.lineTo(-20,-4); gctx.lineTo(-16,-10); gctx.lineTo(10,-10); gctx.closePath();
+  } else if(shipId==='deadeye'){
+    gctx.moveTo(24,0); gctx.lineTo(6,4); gctx.lineTo(6,16); gctx.lineTo(-4,10);
+    gctx.lineTo(-16,14); gctx.lineTo(-10,0); gctx.lineTo(-16,-14); gctx.lineTo(-4,-10);
+    gctx.lineTo(6,-16); gctx.lineTo(6,-4); gctx.closePath();
   } else {
     gctx.moveTo(20,0); gctx.lineTo(0,8); gctx.lineTo(-14,6); gctx.lineTo(-8,0);
     gctx.lineTo(-14,-6); gctx.lineTo(0,-8); gctx.closePath();
@@ -1319,7 +1413,10 @@ function makeShipEntity(def,x,y,isPlayer){
     ammo:MAX_AMMO, ammoRegenTimer:0, // limited-shot pool, regenerates over time
     abilityCharge:1, hitStreak:0, // ability starts charged; recharges via 3 landed hits
     burstRemaining:0, burstTimer:0, burstAngle:0, // Wraith-style queued burst-fire follow-up shots
-    beamActive:0, beamAngle:0, beamTickTimer:0, beamRangeNow:0 // beam-weapon (Bruiser) channel state
+    beamActive:0, beamAngle:0, beamTickTimer:0, beamRangeNow:0, // beam-weapon (Bruiser) channel state
+    comboStreak:0, // consecutive landed hits from this ship's own comboDamage-eligible bullets
+    anchoredTimer:0, // Deadeye's Anchor debuff: >0 while this ship's max speed is halved
+    concealed:false, revealTimer:0 // nebula cloud concealment state
   };
 }
 
@@ -1348,6 +1445,7 @@ function respawnBot(b){
   b.cooldown=0; b.abilityCd=0; b.abilityActive=0; b.boosted=0;
   b.aiState='seek'; b.carryingGems=0; b.respawnTimer=0; b.idleTimer=0;
   b.ammo=MAX_AMMO; b.ammoRegenTimer=0; b.abilityCharge=1; b.hitStreak=0;
+  b.comboStreak=0; b.anchoredTimer=0; b.concealed=false; b.revealTimer=0;
 }
 
 function showAlert(txt,dur){
@@ -1362,6 +1460,8 @@ function showAlert(txt,dur){
 function fireBullet(owner, angle, forcePierce, isFlak, isAbilityShot){
   var def=owner.def;
   var dmg = (owner.isPlayer && owner.eff) ? owner.eff.bulletDamage : def.bulletDamage;
+  if(inAnyNebula(owner)) dmg *= 2; // firing from inside a nebula cloud doubles shot damage
+  owner.revealTimer = NEBULA_FIRED_REVEAL_MS; // firing briefly reveals a concealed shooter
   bullets.push({
     x: owner.x + Math.cos(angle)*22,
     y: owner.y + Math.sin(angle)*22,
@@ -1372,7 +1472,9 @@ function fireBullet(owner, angle, forcePierce, isFlak, isAbilityShot){
     damage: dmg, owner: owner,
     piercing: forcePierce || def.piercing || false,
     hitSet: [],
-    isAbilityShot: !!isAbilityShot
+    isAbilityShot: !!isAbilityShot,
+    comboEligible: !!def.comboDamage, comboTracker: owner,
+    homing: !!def.homing, homingTarget: null, homingTurnRate: def.homingTurnRate||0.05, homingRange: def.homingRange||500
   });
 }
 function bulletAlreadyHit(b, ent){
@@ -1418,6 +1520,7 @@ function updateBeamWeapon(ent, dt){
   if(!ent.alive || ent.beamActive<=0) return;
   ent.beamActive -= dt;
   ent.beamAngle=ent.angle; // sweeps with the ship's current facing, not locked at trigger
+  ent.revealTimer = NEBULA_FIRED_REVEAL_MS; // channeling the beam keeps revealing the shooter
   ent.beamTickTimer -= dt;
   if(ent.beamTickTimer>0) return;
   ent.beamTickTimer=BEAM_TICK_MS;
@@ -1437,6 +1540,7 @@ function updateBeamWeapon(ent, dt){
   var ex=ent.x+Math.cos(ent.beamAngle)*range, ey=ent.y+Math.sin(ent.beamAngle)*range;
   var dps = (ent.isPlayer && ent.eff) ? ent.eff.beamDPS : ent.def.beamDPS;
   var tickDamage=(dps||0)*(BEAM_TICK_MS/1000);
+  if(inAnyNebula(ent)) tickDamage *= 2; // re-checked every tick since the beam can drift in/out of a cloud
   var all=allShips();
   for(var i=0;i<all.length;i++){
     var tgt=all[i];
@@ -1537,6 +1641,23 @@ function drawGem(g){
   ctx.restore();
 }
 
+// Nearest living enemy roughly ahead of `ent` (within a forward cone),
+// used by Deadeye's Anchor so it locks onto whatever the ship is actually
+// facing rather than something behind it.
+function nearestEnemyInFront(ent, range, coneHalfAngle){
+  var all=allShips(), best=null, bestD=Infinity;
+  for(var i=0;i<all.length;i++){
+    var e=all[i];
+    if(!e.alive || e===ent) continue;
+    var d=dst(ent.x,ent.y,e.x,e.y);
+    if(d>range) continue;
+    var ang=angTo(ent.x,ent.y,e.x,e.y);
+    if(Math.abs(angDiff(ent.angle,ang))>coneHalfAngle) continue;
+    if(d<bestD){ bestD=d; best=e; }
+  }
+  return best;
+}
+
 /* =====================================================================
    ABILITY TRIGGER
 ===================================================================== */
@@ -1569,6 +1690,12 @@ function triggerAbilityFor(ent){
     } else if(ent.def.id==='bruiser'){
       // handled by updateTractorPull, which scans for any active Bruiser
       // each frame rather than being triggered from here
+    } else if(ent.def.id==='deadeye'){
+      var anchorTarget = nearestEnemyInFront(ent, ent.def.ability.range||400, Math.PI/2);
+      if(anchorTarget){
+        anchorTarget.anchoredTimer=10000;
+        spawnBurst(anchorTarget.x, anchorTarget.y, ent.def.color, 14);
+      }
     }
   }
 }
@@ -1597,7 +1724,7 @@ var TURRET_FIRE_RATE=300; // ms between shots
 function spawnTurret(ownerEnt){
   turrets.push({
     x:ownerEnt.x, y:ownerEnt.y, angle:ownerEnt.angle, alive:true,
-    color:ownerEnt.def.color, ownerEnt:ownerEnt, fireTimer:0
+    color:ownerEnt.def.color, ownerEnt:ownerEnt, fireTimer:0, comboStreak:0
   });
 }
 // Nearest living ship to this turret, excluding whoever summoned it.
@@ -1606,6 +1733,7 @@ function nearestEnemyOfTurret(t){
   for(var i=0;i<all.length;i++){
     var e=all[i];
     if(!e.alive || e===t.ownerEnt) continue;
+    if(!isDetectableBy(t,e)) continue;
     var d=dst(t.x,t.y,e.x,e.y);
     if(d<bestD){ bestD=d; best=e; }
   }
@@ -1614,11 +1742,13 @@ function nearestEnemyOfTurret(t){
 // Bullets are attributed to the turret's owner (not the turret itself) so
 // kill-crediting and gem drops work exactly like every other ability shot.
 function fireDeputyBullet(t, angle){
+  var dmg = inAnyNebula(t) ? 2 : 1; // turret sitting in a cloud also hits twice as hard
   bullets.push({
     x:t.x+Math.cos(angle)*14, y:t.y+Math.sin(angle)*14,
     vx:Math.cos(angle)*9, vy:Math.sin(angle)*9,
     life:1400, color:t.color, size:2.2,
-    damage:1, owner:t.ownerEnt, piercing:false, hitSet:[], isAbilityShot:false
+    damage:dmg, owner:t.ownerEnt, piercing:false, hitSet:[], isAbilityShot:false,
+    comboEligible:true, comboTracker:t
   });
 }
 function updateTurrets(dt){
@@ -1816,7 +1946,8 @@ function serializeShip(e){
     alive:e.alive, invincible:e.invincible, ammo:e.ammo,
     abilityCharge:e.abilityCharge, hitStreak:e.hitStreak, abilityActive:e.abilityActive,
     carryingGems:e.carryingGems, boosted:e.boosted,
-    beamActive:e.beamActive, beamAngle:e.beamAngle, beamRangeNow:e.beamRangeNow
+    beamActive:e.beamActive, beamAngle:e.beamAngle, beamRangeNow:e.beamRangeNow,
+    anchoredTimer:e.anchoredTimer, concealed:e.concealed, revealTimer:e.revealTimer
   };
 }
 function hostNetworkTick(dt){
@@ -1916,6 +2047,7 @@ function shipFromSnapshot(s){
     ammo:s.ammo, abilityCharge:s.abilityCharge, abilityActive:s.abilityActive||0,
     carryingGems:s.carryingGems||0, boosted:s.boosted||0,
     beamActive:s.beamActive||0, beamAngle:s.beamAngle||0, beamRangeNow:s.beamRangeNow||0,
+    anchoredTimer:s.anchoredTimer||0, concealed:!!s.concealed, revealTimer:s.revealTimer||0,
     isPlayer:false, trail:[], vx:0, vy:0
   };
 }
@@ -1923,6 +2055,7 @@ function startGuestMatch(msg){
   document.getElementById('joinScreen').style.display='none';
   obstacles=msg.obstacles;
   shieldStation.x=msg.shieldStation.x; shieldStation.y=msg.shieldStation.y; shieldStation.pulse=0;
+  nebulaClouds=msg.nebulaClouds||[];
   guestMatchEnded=false;
   gemsCollectedThisMatch=0;
   killCount=0;
@@ -1972,6 +2105,9 @@ function applyGuestSnapshot(msg){
   player.beamActive=msg.me.beamActive||0;
   player.beamAngle=msg.me.beamAngle||0;
   player.beamRangeNow=msg.me.beamRangeNow||0;
+  player.anchoredTimer=msg.me.anchoredTimer||0;
+  player.concealed=!!msg.me.concealed;
+  player.revealTimer=msg.me.revealTimer||0;
   player.trail.push({x:player.x,y:player.y});
   if(player.trail.length>20) player.trail.shift();
 
@@ -1994,6 +2130,7 @@ function applyGuestSnapshot(msg){
       e.ammo=s.ammo; e.abilityCharge=s.abilityCharge; e.abilityActive=s.abilityActive||0;
       e.carryingGems=s.carryingGems||0; e.boosted=s.boosted||0;
       e.beamActive=s.beamActive||0; e.beamAngle=s.beamAngle||0; e.beamRangeNow=s.beamRangeNow||0;
+      e.anchoredTimer=s.anchoredTimer||0; e.concealed=!!s.concealed; e.revealTimer=s.revealTimer||0;
     }
   }
 
@@ -2038,6 +2175,7 @@ function startGame(){
 
   genObstacles();
   placeShieldStation();
+  placeNebulaClouds();
   player=makeShipEntity(selectedShip, WW/2, WH/2, true);
   player.angle=-Math.PI/2;
   player.invincible=1500;
@@ -2064,7 +2202,7 @@ function startGame(){
     remotePlayer=makeRemoteShipEntity(guestChosenShip, gsp.x, gsp.y, guestChosenLevels);
     remotePlayer.angle=rnd(0,Math.PI*2);
     remotePlayer.invincible=1500;
-    netSend({type:'matchStart', obstacles:obstacles, shieldStation:{x:shieldStation.x,y:shieldStation.y}});
+    netSend({type:'matchStart', obstacles:obstacles, shieldStation:{x:shieldStation.x,y:shieldStation.y}, nebulaClouds:nebulaClouds});
   }
 
   document.getElementById('hud').style.display='flex';
@@ -2207,8 +2345,8 @@ function findNearestUnclaimedGem(b){
 // so a guest's ship draws AI attention just like the local player does.
 function nearestThreatHuman(b){
   var best=null, bestD=Infinity;
-  if(player.alive){ bestD=dst(b.x,b.y,player.x,player.y); best=player; }
-  if(remotePlayer && remotePlayer.alive){
+  if(player.alive && isDetectableBy(b,player)){ bestD=dst(b.x,b.y,player.x,player.y); best=player; }
+  if(remotePlayer && remotePlayer.alive && isDetectableBy(b,remotePlayer)){
     var d2=dst(b.x,b.y,remotePlayer.x,remotePlayer.y);
     if(d2<bestD){ bestD=d2; best=remotePlayer; }
   }
@@ -2252,6 +2390,18 @@ function updateBotAI(b, dt){
     // backing off feels more natural, so face the player but thrust away).
     var awayAngle = threatEnt ? angTo(threatEnt.x,threatEnt.y,b.x,b.y) : b.angle;
     var faceAngle = threatEnt ? angTo(b.x,b.y,threatEnt.x,threatEnt.y) : b.angle;
+
+    // Prefer ducking into nearby cloud cover over just running blind --
+    // bias the flee heading toward a reachable cloud instead of straight
+    // away from the threat (facing/firing direction is untouched).
+    if(!inAnyNebula(b)){
+      var cloud=nearestNebula(b.x,b.y);
+      if(cloud && dst(b.x,b.y,cloud.x,cloud.y) < 900){
+        var towardCloud=angTo(b.x,b.y,cloud.x,cloud.y);
+        awayAngle += angDiff(awayAngle,towardCloud)*0.5;
+      }
+    }
+
     var da=angDiff(b.angle, faceAngle);
     b.angle += da*0.10;
 
@@ -2260,7 +2410,7 @@ function updateBotAI(b, dt){
     b.thrusting=true;
     b.vx *= b.def.drag; b.vy *= b.def.drag;
     var sp1=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
-    var maxSp1=b.def.maxSpeed*0.85;
+    var maxSp1=b.def.maxSpeed*0.85*(b.anchoredTimer>0?0.5:1);
     if(sp1>maxSp1){ b.vx=b.vx/sp1*maxSp1; b.vy=b.vy/sp1*maxSp1; }
 
     // A fleeing bot with no gem may still take a defensive shot if cornered
@@ -2287,7 +2437,7 @@ function updateBotAI(b, dt){
     b.thrusting=true;
     b.vx *= b.def.drag; b.vy *= b.def.drag;
     var sp2=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
-    var maxSp2=b.def.maxSpeed*0.8;
+    var maxSp2=b.def.maxSpeed*0.8*(b.anchoredTimer>0?0.5:1);
     if(sp2>maxSp2){ b.vx=b.vx/sp2*maxSp2; b.vy=b.vy/sp2*maxSp2; }
 
     // Pick up the gem on contact -- steals it, then immediately flees with it
@@ -2307,6 +2457,7 @@ function updateBotAI(b, dt){
   for(var i=0;i<bots.length;i++){
     var other=bots[i];
     if(other===b||!other.alive) continue;
+    if(!isDetectableBy(b,other)) continue;
     var d=dst(b.x,b.y,other.x,other.y);
     if(d<bestD && d<260){ target=other; bestD=d; }
   }
@@ -2335,7 +2486,7 @@ function updateBotAI(b, dt){
   }
   b.vx *= b.def.drag; b.vy *= b.def.drag;
   var sp=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
-  var maxSp=b.def.maxSpeed*0.8;
+  var maxSp=b.def.maxSpeed*0.8*(b.anchoredTimer>0?0.5:1);
   if(sp>maxSp){ b.vx=b.vx/sp*maxSp; b.vy=b.vy/sp*maxSp; }
 
   b.cooldown -= dt;
@@ -2390,6 +2541,7 @@ function updateControlledShip(ent, input, dt, movementOnly){
       ent.abilityActive -= dt;
       if(ent.def.id==='vanguard') ent.boosted=ent.abilityActive;
     }
+    if(ent.anchoredTimer>0) ent.anchoredTimer -= dt;
   }
 
   var turnRate=ent.def.turnRate;
@@ -2411,7 +2563,7 @@ function updateControlledShip(ent, input, dt, movementOnly){
   }
   ent.vx *= ent.def.drag; ent.vy *= ent.def.drag;
   var sp=Math.sqrt(ent.vx*ent.vx+ent.vy*ent.vy);
-  var maxSp=effMaxSpeed*boostMul;
+  var maxSp=effMaxSpeed*boostMul*(ent.anchoredTimer>0?0.5:1);
   if(sp>maxSp){ ent.vx=ent.vx/sp*maxSp; ent.vy=ent.vy/sp*maxSp; }
 
   ent.x += ent.vx*(dt/16.67);
@@ -2475,9 +2627,33 @@ function updateRemoteGuestShip(dt){
 /* =====================================================================
    BULLETS
 ===================================================================== */
+// Nearest living ship to a homing bullet's current position, excluding its
+// owner -- reacquired whenever the bullet has no live target of its own.
+function nearestHomingTarget(bl){
+  var all=allShips(), best=null, bestD=Infinity;
+  for(var i=0;i<all.length;i++){
+    var e=all[i];
+    if(!e.alive || e===bl.owner) continue;
+    var d=dst(bl.x,bl.y,e.x,e.y);
+    if(d<bestD && d<=(bl.homingRange||500)){ bestD=d; best=e; }
+  }
+  return best;
+}
 function updateBullets(dt){
   for(var i=bullets.length-1;i>=0;i--){
     var bl=bullets[i];
+    if(bl.homing){
+      if(!bl.homingTarget || !bl.homingTarget.alive) bl.homingTarget=nearestHomingTarget(bl);
+      if(bl.homingTarget){
+        var spd=Math.sqrt(bl.vx*bl.vx+bl.vy*bl.vy);
+        var curAngle=Math.atan2(bl.vy,bl.vx);
+        var wantAngle=angTo(bl.x,bl.y,bl.homingTarget.x,bl.homingTarget.y);
+        var diff=angDiff(curAngle,wantAngle);
+        var turn=Math.max(-bl.homingTurnRate, Math.min(bl.homingTurnRate, diff));
+        var newAngle=curAngle+turn;
+        bl.vx=Math.cos(newAngle)*spd; bl.vy=Math.sin(newAngle)*spd;
+      }
+    }
     bl.x += bl.vx*(dt/16.67); bl.y += bl.vy*(dt/16.67); bl.life -= dt;
     var removed=false;
 
@@ -2498,8 +2674,13 @@ function updateBullets(dt){
         if(bulletAlreadyHit(bl,tgt)) continue;
         if(tgt.invincible>0) continue;
         if(dst(bl.x,bl.y,tgt.x,tgt.y) < tgt.r+bl.size){
-          tgt.hp -= bl.damage;
-          spawnBurst(bl.x,bl.y,bl.color,6);
+          var dmgMult=1;
+          if(bl.comboEligible && bl.comboTracker){
+            dmgMult = Math.pow(2, Math.min(bl.comboTracker.comboStreak,3)); // 1x/2x/4x/8x, capped
+            bl.comboTracker.comboStreak = Math.min(bl.comboTracker.comboStreak+1, 3);
+          }
+          tgt.hp -= bl.damage*dmgMult;
+          spawnBurst(bl.x,bl.y,bl.color, dmgMult>1 ? Math.min(6*dmgMult,36) : 6);
           sfxHit();
           bl.hitSet.push(tgt);
           tgt.invincible = 250; // brief post-hit immunity so one bullet can't multi-tick
@@ -2559,6 +2740,11 @@ function updateBullets(dt){
     }
 
     if(bl.life<=0 || bl.x<0||bl.x>WW||bl.y<0||bl.y>WH) removed=true;
+    // A combo-eligible bullet that's being removed without ever landing a
+    // hit is a miss -- breaks the streak back to 1x for its next shot.
+    if(removed && bl.comboEligible && bl.comboTracker && bl.hitSet.length===0){
+      bl.comboTracker.comboStreak=0;
+    }
     if(removed) bullets.splice(i,1);
   }
 }
@@ -2667,6 +2853,7 @@ function update(dt){
     updateBurstFire(remotePlayer, dt);
     updateBeamWeapon(remotePlayer, dt);
   }
+  updateNebulaStatus(dt);
   for(var i=0;i<bots.length;i++){ if(bots[i].alive) updateBotAI(bots[i],dt); }
   for(var i=0;i<bots.length;i++){
     var b=bots[i];
@@ -2682,6 +2869,7 @@ function update(dt){
     if(b.cooldown>0){} // handled inline in AI
     if(b.abilityCd>0) b.abilityCd -= dt;
     if(b.abilityActive>0) b.abilityActive -= dt;
+    if(b.anchoredTimer>0) b.anchoredTimer -= dt;
     if(b.invincible>0) b.invincible -= dt;
     updateAmmoRegen(b, dt);
     updateBurstFire(b, dt);
@@ -2781,6 +2969,10 @@ function drawShipShape(e){
   } else if(e.def.id==='bruiser'){
     ctx.moveTo(20,0); ctx.lineTo(10,10); ctx.lineTo(-16,10); ctx.lineTo(-20,4);
     ctx.lineTo(-20,-4); ctx.lineTo(-16,-10); ctx.lineTo(10,-10); ctx.closePath();
+  } else if(e.def.id==='deadeye'){
+    ctx.moveTo(24,0); ctx.lineTo(6,4); ctx.lineTo(6,16); ctx.lineTo(-4,10);
+    ctx.lineTo(-16,14); ctx.lineTo(-10,0); ctx.lineTo(-16,-14); ctx.lineTo(-4,-10);
+    ctx.lineTo(6,-16); ctx.lineTo(6,-4); ctx.closePath();
   } else {
     ctx.moveTo(20,0); ctx.lineTo(0,8); ctx.lineTo(-14,6); ctx.lineTo(-8,0);
     ctx.lineTo(-14,-6); ctx.lineTo(0,-8); ctx.closePath();
@@ -2799,6 +2991,15 @@ function drawShipShape(e){
     ctx.rotate(-e.angle); // ring should stay screen-fixed, not spin with the hull
     ctx.strokeStyle='rgba(255,85,0,0.25)'; ctx.lineWidth=2; ctx.setLineDash([8,10]);
     ctx.beginPath(); ctx.arc(0,0,pr,0,Math.PI*2); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
+  }
+  if(e.anchoredTimer>0){
+    // Anchor debuff -- a slowly spinning cyan ring around any anchored ship
+    ctx.save();
+    ctx.rotate(-e.angle + performance.now()*0.0015);
+    ctx.strokeStyle='rgba(32,255,224,0.55)'; ctx.lineWidth=2; ctx.setLineDash([5,6]);
+    ctx.beginPath(); ctx.arc(0,0,24,0,Math.PI*2); ctx.stroke();
     ctx.setLineDash([]);
     ctx.restore();
   }
@@ -2863,6 +3064,7 @@ function drawWorld(){
   for(var i=0;i<obstacles.length;i++) drawObstacle(obstacles[i]);
 
   drawShieldStation();
+  for(var i=0;i<nebulaClouds.length;i++) drawNebulaCloud(nebulaClouds[i]);
 
   for(var i=0;i<gems.length;i++) drawGem(gems[i]);
   for(var i=0;i<turrets.length;i++){ if(turrets[i].alive) drawTurret(turrets[i]); }
@@ -2894,10 +3096,30 @@ function drawWorld(){
   if(remotePlayer && remotePlayer.alive && remotePlayer.beamActive>0) drawBeam(remotePlayer);
   if(player.alive && player.beamActive>0) drawBeam(player);
 
-  for(var i=0;i<bots.length;i++){ if(bots[i].alive) drawShipShape(bots[i]); }
-  if(remotePlayer && remotePlayer.alive) drawShipShape(remotePlayer);
+  for(var i=0;i<bots.length;i++){ if(bots[i].alive && isVisibleToViewer(bots[i])) drawShipShape(bots[i]); }
+  if(remotePlayer && remotePlayer.alive && isVisibleToViewer(remotePlayer)) drawShipShape(remotePlayer);
   if(player.alive) drawShipShape(player);
 
+  ctx.restore();
+}
+// Soft translucent drifting patch -- reuses the shield station's layered
+// radial-gradient/dashed-ring look, just larger and slower.
+function drawNebulaCloud(c){
+  var drift=c.drift+performance.now()*0.00006;
+  var ox=Math.cos(drift)*10, oy=Math.sin(drift)*10;
+  ctx.save();
+  ctx.translate(c.x+ox,c.y+oy);
+  try{
+    var g=ctx.createRadialGradient(0,0,0,0,0,c.r);
+    g.addColorStop(0,'rgba(160,90,255,0.22)');
+    g.addColorStop(0.6,'rgba(120,60,220,0.14)');
+    g.addColorStop(1,'rgba(80,40,160,0)');
+    ctx.beginPath(); ctx.arc(0,0,c.r,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
+  }catch(e){}
+  ctx.strokeStyle='rgba(180,120,255,0.18)'; ctx.lineWidth=2;
+  ctx.setLineDash([14,12]);
+  ctx.beginPath(); ctx.arc(0,0,c.r,0,Math.PI*2); ctx.stroke();
+  ctx.setLineDash([]);
   ctx.restore();
 }
 function drawBeam(e){
@@ -2930,17 +3152,22 @@ function drawMinimap(){
   }
   mx.fillStyle='rgba(80,255,180,0.85)';
   mx.beginPath(); mx.arc(shieldStation.x*scaleX,shieldStation.y*scaleY,3.5,0,Math.PI*2); mx.fill();
+  mx.fillStyle='rgba(170,100,255,0.35)';
+  for(var i=0;i<nebulaClouds.length;i++){
+    var c=nebulaClouds[i];
+    mx.beginPath(); mx.arc(c.x*scaleX,c.y*scaleY,c.r*scaleX,0,Math.PI*2); mx.fill();
+  }
   for(var i=0;i<turrets.length;i++){
     var trt=turrets[i]; if(!trt.alive) continue;
     mx.fillStyle=trt.color;
     mx.beginPath(); mx.arc(trt.x*scaleX,trt.y*scaleY,1.5,0,Math.PI*2); mx.fill();
   }
   for(var i=0;i<bots.length;i++){
-    var b=bots[i]; if(!b.alive) continue;
+    var b=bots[i]; if(!b.alive || !isVisibleToViewer(b)) continue;
     mx.fillStyle=b.def.color;
     mx.beginPath(); mx.arc(b.x*scaleX,b.y*scaleY,2.5,0,Math.PI*2); mx.fill();
   }
-  if(remotePlayer && remotePlayer.alive){
+  if(remotePlayer && remotePlayer.alive && isVisibleToViewer(remotePlayer)){
     mx.fillStyle=remotePlayer.def.color;
     mx.beginPath(); mx.arc(remotePlayer.x*scaleX,remotePlayer.y*scaleY,3,0,Math.PI*2); mx.fill();
   }
