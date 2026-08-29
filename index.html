@@ -350,7 +350,7 @@ var SHIPS = [
     id:'bruiser', name:'BRUISER TANK', role:'Beam Tank', color:'#ff5500', rgb:'255,85,0',
     hp:200, turnRate:0.045, thrustPower:0.18, maxSpeed:5.2, drag:0.988,
     beamWeapon:true, beamRange:320, beamDPS:32, beamDuration:2000,
-    ability:{name:'TRACTOR BEAM', icon:'<<', cooldown:14000, duration:2000, pullRange:350, desc:'Projects a pulsing field that drags every nearby enemy in close, no damage of its own -- just sets them up for the beam.'},
+    ability:{name:'TRACTOR BEAM', icon:'<<', cooldown:14000, duration:2000, pullRange:350, desc:'Projects a pulsing field that drags every nearby enemy in close and holds them to half speed, no damage of its own -- just sets them up for the beam.'},
     desc:'The slowest, toughest hull in the fleet. Its only weapon is a sustained beam that channels for two full seconds using the entire ammo bar in one commitment -- devastating to anything caught in a straight line, but a long recharge afterward.'
   }
 ];
@@ -598,10 +598,12 @@ function updateShieldStation(dt){
 /* =====================================================================
    TRACTOR PULL -- Bruiser's ability. Purely positional (no damage of its
    own): while active, drags every other living ship within pullRange
-   steadily toward the Bruiser, setting them up for its beam. Scans for
-   any currently-active Bruiser each frame rather than being triggered
-   from a single entity, same pattern as the shield station's single pass
-   over allShips().
+   steadily toward the Bruiser and holds them there -- their own thrust
+   is capped to half normal speed for as long as they're caught in the
+   field, so they can't simply outrun it, setting them up for the beam.
+   Scans for any currently-active Bruiser each frame rather than being
+   triggered from a single entity, same pattern as the shield station's
+   single pass over allShips().
 ===================================================================== */
 function updateTractorPull(dt){
   var all=allShips();
@@ -617,6 +619,13 @@ function updateTractorPull(dt){
       var ang=angTo(tgt.x,tgt.y,puller.x,puller.y);
       tgt.vx += Math.cos(ang)*0.35*(dt/16.67);
       tgt.vy += Math.sin(ang)*0.35*(dt/16.67);
+
+      // Held in the field -- clamp their speed to 50% of normal, same as
+      // a normal movement-speed cap, regardless of their own thrust.
+      var tgtMaxSpeed=(tgt.isPlayer && tgt.eff) ? tgt.eff.maxSpeed : tgt.def.maxSpeed;
+      var cap=tgtMaxSpeed*0.5;
+      var sp=Math.sqrt(tgt.vx*tgt.vx+tgt.vy*tgt.vy);
+      if(sp>cap){ tgt.vx=tgt.vx/sp*cap; tgt.vy=tgt.vy/sp*cap; }
     }
   }
 }
@@ -1408,6 +1417,7 @@ var BEAM_TICK_MS=100;
 function updateBeamWeapon(ent, dt){
   if(!ent.alive || ent.beamActive<=0) return;
   ent.beamActive -= dt;
+  ent.beamAngle=ent.angle; // sweeps with the ship's current facing, not locked at trigger
   ent.beamTickTimer -= dt;
   if(ent.beamTickTimer>0) return;
   ent.beamTickTimer=BEAM_TICK_MS;
@@ -2415,8 +2425,9 @@ function updateControlledShip(ent, input, dt, movementOnly){
 
   if(ent.def.beamWeapon){
     // A beam ship's "shot" is a single 2-second channel that spends the
-    // whole ammo bar at once, not a per-press bullet -- see
-    // updateBeamWeapon for the actual damage-over-time tick.
+    // whole ammo bar at once, not a per-press bullet, and sweeps with the
+    // ship's turning for its whole duration -- see updateBeamWeapon for
+    // the actual per-tick angle tracking and damage.
     if(input.fireOn && ent.beamActive<=0 && ent.ammo>=MAX_AMMO){
       ent.ammo=0;
       ent.beamActive=ent.def.beamDuration||2000;
