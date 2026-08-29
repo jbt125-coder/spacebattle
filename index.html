@@ -359,8 +359,8 @@ var SHIPS = [
     hp:105, turnRate:0.06, thrustPower:0.21, maxSpeed:6.8, drag:0.987,
     fireRate:520, bulletSpeed:7, bulletDamage:13, bulletLife:2800,
     homing:true, homingTurnRate:0.05, homingRange:500,
-    ability:{name:'ANCHOR', icon:'#', cooldown:13000, duration:1, range:400, desc:'Locks the nearest enemy ahead with a slowing anchor, cutting its speed in half for 10 seconds.'},
-    desc:'Every round fired curves to chase its target down, so aim just has to be close. Anchor snares the nearest threat in front and halves its speed for ten seconds -- great for running down or pinning a fleeing bot.'
+    ability:{name:'ANCHOR', icon:'#', cooldown:13000, duration:1, range:400, desc:'Fires a red heat-seeking anchor missile for half normal damage. On impact it slaps a slowing anchor onto the target, cutting its speed in half for 10 seconds.'},
+    desc:'Every round fired curves to chase its target down, so aim just has to be close. Anchor fires a dedicated red missile that snares whatever it hits with a ten-second, half-speed slow -- great for running down or pinning a fleeing bot.'
   }
 ];
 
@@ -1691,11 +1691,18 @@ function triggerAbilityFor(ent){
       // handled by updateTractorPull, which scans for any active Bruiser
       // each frame rather than being triggered from here
     } else if(ent.def.id==='deadeye'){
+      // Fires a visible red heat-seeking missile rather than an instant
+      // invisible lock -- it flies and homes exactly like a normal Deadeye
+      // bullet (reusing the same homing steering in updateBullets), just
+      // for half the damage. Whatever it hits gets anchored on impact.
       var anchorTarget = nearestEnemyInFront(ent, ent.def.ability.range||400, Math.PI/2);
-      if(anchorTarget){
-        anchorTarget.anchoredTimer=10000;
-        spawnBurst(anchorTarget.x, anchorTarget.y, ent.def.color, 14);
-      }
+      var fireAngle = anchorTarget ? angTo(ent.x,ent.y,anchorTarget.x,anchorTarget.y) : ent.angle;
+      fireBullet(ent, fireAngle, false, false, true);
+      var missile = bullets[bullets.length-1];
+      missile.color = '#ff2a2a';
+      missile.damage = missile.damage/2;
+      missile.isAnchorMissile = true;
+      missile.homingTarget = anchorTarget; // lock straight onto the forward target if one was found
     }
   }
 }
@@ -2685,6 +2692,14 @@ function updateBullets(dt){
           bl.hitSet.push(tgt);
           tgt.invincible = 250; // brief post-hit immunity so one bullet can't multi-tick
 
+          // Deadeye's Anchor missile: on impact, slaps a 10s/50%-speed
+          // anchor onto whatever it hit, on top of its own (halved) damage.
+          if(bl.isAnchorMissile){
+            tgt.anchoredTimer = 10000;
+            spawnBurst(tgt.x, tgt.y, '#ff2a2a', 12);
+            if(bl.owner===player) showAlert('TARGET ANCHORED', 1800);
+          }
+
           // Landing a REGULAR shot (not an ability shot) builds toward an
           // ability recharge for the shooter -- 3 landed hits = +1 charge,
           // capped at 1 banked charge.
@@ -2995,12 +3010,23 @@ function drawShipShape(e){
     ctx.restore();
   }
   if(e.anchoredTimer>0){
-    // Anchor debuff -- a slowly spinning cyan ring around any anchored ship
+    // Anchor debuff -- a slowly spinning red ring plus a small anchor icon
+    // that stays visibly lodged in the hull for the whole 10s slow.
     ctx.save();
     ctx.rotate(-e.angle + performance.now()*0.0015);
-    ctx.strokeStyle='rgba(32,255,224,0.55)'; ctx.lineWidth=2; ctx.setLineDash([5,6]);
+    ctx.strokeStyle='rgba(255,42,42,0.55)'; ctx.lineWidth=2; ctx.setLineDash([5,6]);
     ctx.beginPath(); ctx.arc(0,0,24,0,Math.PI*2); ctx.stroke();
     ctx.setLineDash([]);
+    ctx.restore();
+
+    ctx.save();
+    ctx.rotate(-e.angle); // icon stays screen-fixed, doesn't spin with the hull
+    ctx.translate(0,-18);
+    ctx.strokeStyle='#ff2a2a'; ctx.fillStyle='#ff2a2a'; ctx.lineWidth=1.6;
+    ctx.shadowColor='#ff2a2a'; ctx.shadowBlur=6;
+    ctx.beginPath(); ctx.arc(0,-4,2.2,0,Math.PI*2); ctx.fill(); // ring
+    ctx.beginPath(); ctx.moveTo(0,-2); ctx.lineTo(0,6); ctx.stroke(); // shaft
+    ctx.beginPath(); ctx.moveTo(-4,3); ctx.lineTo(0,6); ctx.lineTo(4,3); ctx.stroke(); // flukes
     ctx.restore();
   }
   ctx.restore();
