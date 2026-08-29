@@ -361,6 +361,13 @@ var SHIPS = [
     homing:true, homingTurnRate:0.05, homingRange:500,
     ability:{name:'ANCHOR', icon:'#', cooldown:13000, duration:1, range:400, desc:'Fires a red heat-seeking anchor missile for half normal damage. On impact it slaps a slowing anchor onto the target, cutting its speed in half for 10 seconds.'},
     desc:'Every round fired curves to chase its target down, so aim just has to be close. Anchor fires a dedicated red missile that snares whatever it hits with a ten-second, half-speed slow -- great for running down or pinning a fleeing bot.'
+  },
+  {
+    id:'nebula', name:'NEBULA', role:'Area Denial', color:'#b060ff', rgb:'176,96,255',
+    hp:130, turnRate:0.05, thrustPower:0.19, maxSpeed:6.0, drag:0.987,
+    coneWeapon:true, coneRange:240, coneAngle:Math.PI/3, coneFireRate:1600, coneBaseDPS:14, coneLife:5000,
+    ability:{name:'ORANGE NEBULA', icon:'@', cooldown:18000, duration:1, desc:'Permanently plants an orange nebula cloud. Works like a normal cloud for everyone (concealment, 2x fire damage), and any Nebula-class ship heals twice as fast while inside one. Capped at 3 live at once.'},
+    desc:'Trades bullets for a wide cone of nebula gas that lingers where it lands for five seconds, chewing through anything that stays inside as the damage ramps up. Orange Nebula permanently seeds the map with a cloud that doubles healing for fellow Nebula ships on top of the usual concealment and damage boost.'
   }
 ];
 
@@ -599,7 +606,7 @@ function updateShieldStation(dt){
     if(!e.alive) continue;
     if(e.hp>=e.maxHp) continue;
     if(dst(e.x,e.y,shieldStation.x,shieldStation.y) < shieldStation.r+e.r){
-      e.hp = Math.min(e.maxHp, e.hp + e.maxHp*SHIELD_HEAL_RATE*(dt/1000));
+      e.hp = Math.min(e.maxHp, e.hp + e.maxHp*SHIELD_HEAL_RATE*nebulaHealMultiplier(e)*(dt/1000));
     }
   }
 }
@@ -684,6 +691,99 @@ function isVisibleToViewer(e){
   if(e.revealTimer>0) return true;
   return dst(player.x,player.y,e.x,e.y) <= NEBULA_DETECT_RANGE;
 }
+// Extra heal-rate multiplier while a Nebula-class ship sits inside an
+// orange (permanent) cloud -- used by updateIdleRegen and updateShieldStation.
+// Everyone else gets the normal nebula effects (concealment, 2x fire
+// damage) from an orange cloud for free via inAnyNebula/fireBullet already
+// being agnostic to the `orange` flag; only this extra heal boost is
+// Nebula-hull-specific.
+function nebulaHealMultiplier(ent){
+  if(ent.def.id!=='nebula') return 1;
+  var c=inAnyNebula(ent);
+  return (c && c.orange) ? 2 : 1;
+}
+
+/* =====================================================================
+   GAS CLOUDS -- Nebula ship's regular weapon. Each trigger pull spawns one
+   stationary cone-shaped patch of nebula gas anchored at the firing ship's
+   position/facing at that instant (it does NOT track the shooter afterward
+   -- it's a hazard left behind, like Bruiser's beam is a controlled line).
+   Any ship caught inside takes ramping tick damage the longer it stays,
+   tracked per (cloud instance, ship) pair via each cloud's own `exposures`
+   list; leaving the cloud drops that ship's entry, resetting the ramp. The
+   whole cloud dissipates after coneLife ms regardless of who's inside.
+===================================================================== */
+var gasClouds=[];
+var GAS_TICK_MS=400;
+var GAS_RAMP_SEC=3;      // seconds of continuous exposure to reach the damage cap
+var GAS_RAMP_MAX_MULT=3; // 1x at entry, ramping linearly up to this by GAS_RAMP_SEC
+
+function spawnGasCone(ent, angle){
+  var def=ent.def;
+  var dps=def.coneBaseDPS;
+  if(inAnyNebula(ent)) dps*=2; // same universal nebula fire-damage boost as bullets/beam/turret
+  gasClouds.push({
+    x:ent.x, y:ent.y, angle:angle,
+    range:def.coneRange, coneAngle:def.coneAngle,
+    life:def.coneLife, maxLife:def.coneLife,
+    tickTimer:0, baseDPS:dps, owner:ent, exposures:[]
+  });
+}
+// Host-only: ticks damage for every gas cloud currently on the field and
+// expires them once their life runs out. Never runs on the guest (same as
+// updateBullets) -- the guest only ever draws whatever gasClouds array the
+// latest snapshot handed it.
+function updateGasClouds(dt){
+  for(var i=gasClouds.length-1;i>=0;i--){
+    var c=gasClouds[i];
+    c.life -= dt;
+    if(c.life<=0){ gasClouds.splice(i,1); continue; }
+    c.tickTimer -= dt;
+    var doTick=c.tickTimer<=0;
+    if(doTick) c.tickTimer=GAS_TICK_MS;
+
+    var all=allShips(), stillInside=[];
+    for(var j=0;j<all.length;j++){
+      var e=all[j];
+      if(!e.alive || e===c.owner || e.invincible>0) continue;
+      var d=dst(c.x,c.y,e.x,e.y);
+      if(d>c.range) continue;
+      var ang=angTo(c.x,c.y,e.x,e.y);
+      if(Math.abs(angDiff(c.angle,ang))>c.coneAngle/2) continue;
+
+      stillInside.push(e);
+      var exp=null;
+      for(var k=0;k<c.exposures.length;k++){ if(c.exposures[k].ent===e){ exp=c.exposures[k]; break; } }
+      if(!exp){ exp={ent:e, ms:0}; c.exposures.push(exp); }
+      exp.ms += dt;
+
+      if(doTick){
+        var mult=1+Math.min(exp.ms/(GAS_RAMP_SEC*1000),1)*(GAS_RAMP_MAX_MULT-1);
+        var dmg=c.baseDPS*(GAS_TICK_MS/1000)*mult;
+        e.hp -= dmg;
+        spawnBurst(e.x,e.y,'#b060ff',4);
+        sfxHit();
+        if(e.hp<=0 && e.alive){
+          e.alive=false;
+          spawnBurst(e.x,e.y,e.def.color,28);
+          sfxShipExplosion();
+          if(!e.isPlayer && (c.owner===player || c.owner===remotePlayer)){
+            killCount++;
+            spawnGem(e.x, e.y);
+            for(var gi=0; gi<e.carryingGems; gi++){
+              spawnGem(e.x + rnd(-24,24), e.y + rnd(-24,24));
+            }
+            e.carryingGems=0;
+          }
+          if(!e.isPlayer) e.respawnTimer=rnd(3000,5000);
+        }
+      }
+    }
+    // Anyone no longer inside loses their exposure entry -- their ramp
+    // resets back to base if they re-enter later (or a different cloud).
+    c.exposures=c.exposures.filter(function(ex){ return stillInside.indexOf(ex.ent)>=0; });
+  }
+}
 
 /* =====================================================================
    TRACTOR PULL -- Bruiser's ability. Purely positional (no damage of its
@@ -740,7 +840,7 @@ function updateIdleRegen(dt){
     e.idleTimer += dt;
     if(e.hp<e.maxHp && e.idleTimer>=IDLE_REGEN_DELAY){
       var rate = e.thrusting ? FLYING_REGEN_RATE : IDLE_REGEN_RATE;
-      e.hp = Math.min(e.maxHp, e.hp + e.maxHp*rate*(dt/1000));
+      e.hp = Math.min(e.maxHp, e.hp + e.maxHp*rate*nebulaHealMultiplier(e)*(dt/1000));
     }
   }
 }
@@ -1133,6 +1233,10 @@ function drawShipGlyph(gctx, cx, cy, scale, color, t, shipId){
     gctx.moveTo(24,0); gctx.lineTo(6,4); gctx.lineTo(6,16); gctx.lineTo(-4,10);
     gctx.lineTo(-16,14); gctx.lineTo(-10,0); gctx.lineTo(-16,-14); gctx.lineTo(-4,-10);
     gctx.lineTo(6,-16); gctx.lineTo(6,-4); gctx.closePath();
+  } else if(shipId==='nebula'){
+    gctx.moveTo(18,0); gctx.lineTo(10,8); gctx.lineTo(2,14); gctx.lineTo(-8,12);
+    gctx.lineTo(-16,4); gctx.lineTo(-16,-4); gctx.lineTo(-8,-12); gctx.lineTo(2,-14);
+    gctx.lineTo(10,-8); gctx.closePath();
   } else {
     gctx.moveTo(20,0); gctx.lineTo(0,8); gctx.lineTo(-14,6); gctx.lineTo(-8,0);
     gctx.lineTo(-14,-6); gctx.lineTo(0,-8); gctx.closePath();
@@ -1703,6 +1807,21 @@ function triggerAbilityFor(ent){
       missile.damage = missile.damage/2;
       missile.isAnchorMissile = true;
       missile.homingTarget = anchorTarget; // lock straight onto the forward target if one was found
+    } else if(ent.def.id==='nebula'){
+      // Permanently seeds the map with an orange nebula cloud -- it's just
+      // another entry in the shared nebulaClouds array (tagged orange:true)
+      // so every existing nebula mechanic (concealment, 2x fire damage,
+      // bot flee-toward-cover) applies to it for free. Capped at 3 live at
+      // once map-wide; a 4th cast evicts the oldest one to make room.
+      var orangeExisting=[];
+      for(var oc=0; oc<nebulaClouds.length; oc++){ if(nebulaClouds[oc].orange) orangeExisting.push(nebulaClouds[oc]); }
+      if(orangeExisting.length>=3){
+        var oldestIdx=nebulaClouds.indexOf(orangeExisting[0]);
+        if(oldestIdx>=0) nebulaClouds.splice(oldestIdx,1);
+      }
+      nebulaClouds.push({x:ent.x, y:ent.y, r:190, drift:rnd(0,Math.PI*2), orange:true});
+      spawnBurst(ent.x, ent.y, '#ffa020', 16);
+      if(ent===player) showAlert('ORANGE NEBULA PLANTED', 1800);
     }
   }
 }
@@ -1975,6 +2094,8 @@ function hostNetworkTick(dt){
     bullets: bullets.map(function(b){ return {x:b.x,y:b.y,vx:b.vx,vy:b.vy,color:b.color,size:b.size}; }),
     gems: gems.map(function(g){ return {x:g.x,y:g.y}; }),
     turrets: turrets.filter(function(t){ return t.alive; }).map(function(t){ return {x:t.x,y:t.y,angle:t.angle,color:t.color}; }),
+    gasClouds: gasClouds.map(function(c){ return {x:c.x,y:c.y,angle:c.angle,range:c.range,coneAngle:c.coneAngle,life:c.life,maxLife:c.maxLife}; }),
+    nebulaClouds: nebulaClouds, // small array; resent live so the guest sees new/evicted orange clouds mid-match
     killCount: killCount,
     remaining: remaining,
     fx: pendingFx
@@ -2066,7 +2187,7 @@ function startGuestMatch(msg){
   guestMatchEnded=false;
   gemsCollectedThisMatch=0;
   killCount=0;
-  bullets=[]; particles=[]; gems=[]; bots=[]; turrets=[];
+  bullets=[]; particles=[]; gems=[]; bots=[]; turrets=[]; gasClouds=[];
 
   player=makeShipEntity(selectedShip, WW/2, WH/2, true);
   player.eff=effectiveStatsFromLevels(selectedShip, getShipProgress(selectedShip.id));
@@ -2146,6 +2267,8 @@ function applyGuestSnapshot(msg){
   // Turrets are stationary once placed, so a wholesale replace each tick
   // (no interpolation needed) is simplest and never visibly jitters.
   turrets=(msg.turrets||[]).map(function(t){ return {x:t.x,y:t.y,angle:t.angle,alive:true,color:t.color}; });
+  gasClouds=msg.gasClouds||[]; // draw-only on the guest, host still does all the damage ticking
+  if(msg.nebulaClouds) nebulaClouds=msg.nebulaClouds; // picks up newly-placed/evicted orange clouds live
   killCount=msg.killCount;
 
   updateHUD();
@@ -2186,7 +2309,7 @@ function startGame(){
   player=makeShipEntity(selectedShip, WW/2, WH/2, true);
   player.angle=-Math.PI/2;
   player.invincible=1500;
-  bots=[]; bullets=[]; particles=[]; gems=[]; turrets=[]; killCount=0;
+  bots=[]; bullets=[]; particles=[]; gems=[]; turrets=[]; gasClouds=[]; killCount=0;
   gemsCollectedThisMatch=0;
   remotePlayer=null;
   lastGuestInput={turnLeft:false, turnRight:false, thrustOn:false, fireOn:false};
@@ -2423,11 +2546,13 @@ function updateBotAI(b, dt){
     // A fleeing bot with no gem may still take a defensive shot if cornered
     // -- beam-weapon ships can't snap off a quick defensive shot like this
     // (they need the full ammo bar and a committed 2s channel), so skip it.
+    // Cone-weapon ships CAN -- it's a single quick trigger pull like a
+    // normal bullet, not a committed channel.
     b.cooldown -= dt;
     if(!b.def.beamWeapon && b.aiState==='flee' && b.cooldown<=0 && distToPlayer<DANGER_RANGE && threatEnt && b.ammo>0){
-      beginFire(b, faceAngle);
+      if(b.def.coneWeapon){ spawnGasCone(b, faceAngle); b.cooldown = b.def.coneFireRate*1.8; }
+      else { beginFire(b, faceAngle); b.cooldown = b.def.fireRate*1.8; }
       b.ammo--;
-      b.cooldown = b.def.fireRate*1.8;
       b.idleTimer=0;
     }
     return;
@@ -2471,7 +2596,7 @@ function updateBotAI(b, dt){
   if(!target){ b.vx*=0.9; b.vy*=0.9; return; }
 
   var angleToTarget=angTo(b.x,b.y,target.x,target.y);
-  var idealRange = b.def.id==='longshot' ? 480 : (b.def.id==='swarmer' ? 150 : 280);
+  var idealRange = b.def.id==='longshot' ? 480 : (b.def.id==='swarmer' ? 150 : (b.def.id==='nebula' ? 170 : 280));
 
   var moveAngle=angleToTarget;
   if(bestD > idealRange+40){
@@ -2503,6 +2628,13 @@ function updateBotAI(b, dt){
       b.beamActive=b.def.beamDuration||2000;
       b.beamAngle=angleToTarget;
       b.beamTickTimer=0;
+      b.idleTimer=0;
+    }
+  } else if(b.def.coneWeapon){
+    if(b.cooldown<=0 && bestD < idealRange+130 && b.ammo>0){
+      spawnGasCone(b, angleToTarget);
+      b.ammo--;
+      b.cooldown = b.def.coneFireRate;
       b.idleTimer=0;
     }
   } else if(b.cooldown<=0 && bestD < idealRange+130 && b.ammo>0){
@@ -2592,6 +2724,21 @@ function updateControlledShip(ent, input, dt, movementOnly){
       ent.beamActive=ent.def.beamDuration||2000;
       ent.beamAngle=ent.angle;
       ent.beamTickTimer=0;
+      ent.idleTimer=0;
+      if(ent===player) sfxFire();
+    }
+    return;
+  }
+
+  if(ent.def.coneWeapon){
+    // A single triggered burst -- spawns one stationary cone of gas that
+    // lingers where it lands (see spawnGasCone/updateGasClouds), not a
+    // beam that tracks the shooter, so this is a normal cooldown+ammo gate
+    // like a regular bullet rather than a full-bar channel.
+    if(input.fireOn && ent.cooldown<=0 && ent.ammo>0){
+      spawnGasCone(ent, ent.angle);
+      ent.ammo--;
+      ent.cooldown=ent.def.coneFireRate;
       ent.idleTimer=0;
       if(ent===player) sfxFire();
     }
@@ -2896,6 +3043,7 @@ function update(dt){
   }
   updateBullets(dt);
   updateTurrets(dt);
+  updateGasClouds(dt);
   updateGems(dt);
   updateShieldStation(dt);
   updateTractorPull(dt);
@@ -2988,6 +3136,10 @@ function drawShipShape(e){
     ctx.moveTo(24,0); ctx.lineTo(6,4); ctx.lineTo(6,16); ctx.lineTo(-4,10);
     ctx.lineTo(-16,14); ctx.lineTo(-10,0); ctx.lineTo(-16,-14); ctx.lineTo(-4,-10);
     ctx.lineTo(6,-16); ctx.lineTo(6,-4); ctx.closePath();
+  } else if(e.def.id==='nebula'){
+    ctx.moveTo(18,0); ctx.lineTo(10,8); ctx.lineTo(2,14); ctx.lineTo(-8,12);
+    ctx.lineTo(-16,4); ctx.lineTo(-16,-4); ctx.lineTo(-8,-12); ctx.lineTo(2,-14);
+    ctx.lineTo(10,-8); ctx.closePath();
   } else {
     ctx.moveTo(20,0); ctx.lineTo(0,8); ctx.lineTo(-14,6); ctx.lineTo(-8,0);
     ctx.lineTo(-14,-6); ctx.lineTo(0,-8); ctx.closePath();
@@ -3091,6 +3243,7 @@ function drawWorld(){
 
   drawShieldStation();
   for(var i=0;i<nebulaClouds.length;i++) drawNebulaCloud(nebulaClouds[i]);
+  for(var i=0;i<gasClouds.length;i++) drawGasCloud(gasClouds[i]);
 
   for(var i=0;i<gems.length;i++) drawGem(gems[i]);
   for(var i=0;i<turrets.length;i++){ if(turrets[i].alive) drawTurret(turrets[i]); }
@@ -3129,7 +3282,8 @@ function drawWorld(){
   ctx.restore();
 }
 // Soft translucent drifting patch -- reuses the shield station's layered
-// radial-gradient/dashed-ring look, just larger and slower.
+// radial-gradient/dashed-ring look, just larger and slower. Orange
+// (permanent) clouds get a warm palette instead of the default purple.
 function drawNebulaCloud(c){
   var drift=c.drift+performance.now()*0.00006;
   var ox=Math.cos(drift)*10, oy=Math.sin(drift)*10;
@@ -3137,15 +3291,49 @@ function drawNebulaCloud(c){
   ctx.translate(c.x+ox,c.y+oy);
   try{
     var g=ctx.createRadialGradient(0,0,0,0,0,c.r);
-    g.addColorStop(0,'rgba(160,90,255,0.22)');
-    g.addColorStop(0.6,'rgba(120,60,220,0.14)');
-    g.addColorStop(1,'rgba(80,40,160,0)');
+    if(c.orange){
+      g.addColorStop(0,'rgba(255,150,20,0.24)');
+      g.addColorStop(0.6,'rgba(255,110,20,0.15)');
+      g.addColorStop(1,'rgba(200,80,10,0)');
+    } else {
+      g.addColorStop(0,'rgba(160,90,255,0.22)');
+      g.addColorStop(0.6,'rgba(120,60,220,0.14)');
+      g.addColorStop(1,'rgba(80,40,160,0)');
+    }
     ctx.beginPath(); ctx.arc(0,0,c.r,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
   }catch(e){}
-  ctx.strokeStyle='rgba(180,120,255,0.18)'; ctx.lineWidth=2;
+  ctx.strokeStyle = c.orange ? 'rgba(255,170,60,0.22)' : 'rgba(180,120,255,0.18)';
+  ctx.lineWidth=2;
   ctx.setLineDash([14,12]);
   ctx.beginPath(); ctx.arc(0,0,c.r,0,Math.PI*2); ctx.stroke();
   ctx.setLineDash([]);
+  ctx.restore();
+}
+// Nebula ship's cone gas burst -- a fading translucent wedge from the
+// firing point out to its range, alpha scaled by remaining life.
+function drawGasCloud(c){
+  var alpha=Math.max(0, c.life/c.maxLife);
+  ctx.save();
+  ctx.translate(c.x,c.y);
+  try{
+    var g=ctx.createRadialGradient(0,0,0,0,0,c.range);
+    g.addColorStop(0,'rgba(176,96,255,'+(0.30*alpha)+')');
+    g.addColorStop(0.65,'rgba(150,70,240,'+(0.18*alpha)+')');
+    g.addColorStop(1,'rgba(110,40,200,0)');
+    ctx.beginPath();
+    ctx.moveTo(0,0);
+    ctx.arc(0,0,c.range,c.angle-c.coneAngle/2,c.angle+c.coneAngle/2);
+    ctx.closePath();
+    ctx.fillStyle=g;
+    ctx.fill();
+  }catch(e){}
+  ctx.strokeStyle='rgba(200,150,255,'+(0.25*alpha)+')';
+  ctx.lineWidth=1.5;
+  ctx.beginPath();
+  ctx.moveTo(0,0);
+  ctx.arc(0,0,c.range,c.angle-c.coneAngle/2,c.angle+c.coneAngle/2);
+  ctx.closePath();
+  ctx.stroke();
   ctx.restore();
 }
 function drawBeam(e){
@@ -3178,9 +3366,9 @@ function drawMinimap(){
   }
   mx.fillStyle='rgba(80,255,180,0.85)';
   mx.beginPath(); mx.arc(shieldStation.x*scaleX,shieldStation.y*scaleY,3.5,0,Math.PI*2); mx.fill();
-  mx.fillStyle='rgba(170,100,255,0.35)';
   for(var i=0;i<nebulaClouds.length;i++){
     var c=nebulaClouds[i];
+    mx.fillStyle = c.orange ? 'rgba(255,150,20,0.4)' : 'rgba(170,100,255,0.35)';
     mx.beginPath(); mx.arc(c.x*scaleX,c.y*scaleY,c.r*scaleX,0,Math.PI*2); mx.fill();
   }
   for(var i=0;i<turrets.length;i++){
