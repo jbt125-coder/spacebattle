@@ -1334,17 +1334,92 @@ document.getElementById('ytPlay').addEventListener('click',function(){
   // ---------------------------------------------------------------------
   function resetDummyFighter(f,sign){
     var def=SHIPS[rndI(0,SHIPS.length-1)];
-    f.fx = sign<0 ? 0.30 : 0.70; f.fy=0.79;
-    f.vx=0; f.vy=0; f.angle = sign<0 ? 0 : Math.PI;
-    f.hp=40; f.maxHp=40; f.color=def.color; f.shipId=def.id;
+    f.fx = sign<0 ? 0.33 : 0.67; f.fy=0.79;
+    f.vx=0; f.vy=0; f.angle = sign<0 ? 0 : Math.PI; f.beamAngle=f.angle;
+    f.hp=40; f.maxHp=40; f.color=def.color; f.shipId=def.id; f.def=def;
     f.cooldown=rndI(30,90); f.respawnTimer=0; f.flick=Math.random()*100;
     f.strafeDir = Math.random()<0.5?1:-1; f.decisionTimer=rndI(40,100);
+    f.beamActive=0; f.burstRemaining=0; f.burstAngle=0; f.burstTimer=0;
   }
   var dummyA={}, dummyB={};
   resetDummyFighter(dummyA,-1);
   resetDummyFighter(dummyB,1);
-  var dummyBullets=[], dummyParticles=[];
+  var dummyBullets=[], dummyParticles=[], dummyGasClouds=[], dummyGem=null;
   window.__titleDummyFighters=[dummyA,dummyB]; // read-only hook for automated tests
+  // Extra hooks for automated tests -- letting a test force a specific ship
+  // onto a fighter and inspect the decorative bullet/cloud/gem state, the
+  // same "expose internal state, never touch real gameplay arrays" pattern
+  // as __titleDummyFighters above.
+  window.__titleDummyDebug = {
+    bullets: dummyBullets, gasClouds: dummyGasClouds, particles: dummyParticles,
+    getGem: function(){ return dummyGem; },
+    // Lets a test drive the simulation a fixed number of frames directly,
+    // instead of waiting on real wall-clock time + requestAnimationFrame --
+    // immune to the host machine's actual frame rate.
+    step: function(n, w, h){
+      w = w || tc.width; h = h || tc.height;
+      for(var i=0;i<(n||1);i++) stepDummyBattle(w,h);
+    },
+    forceShip: function(f, shipId){
+      var def=SHIPS.filter(function(s){ return s.id===shipId; })[0];
+      if(!def) return;
+      f.def=def; f.shipId=def.id; f.color=def.color; f.hp=40; f.maxHp=40;
+      f.beamActive=0; f.burstRemaining=0; f.cooldown=1;
+    }
+  };
+
+  // Per-ship weapon behavior, mirroring the real fireBullet/updateBeamWeapon/
+  // spawnGasCone dispatch by def field (beamWeapon/coneWeapon/burstCount/
+  // bulletsPerShot/piercing/homing) instead of one generic shot for every ship.
+  function makeDummyBullet(f,ax,ay,angle,dmg,piercing,homing){
+    var spd = homing ? 3.4 : 4.4;
+    return {
+      x:ax, y:ay, vx:Math.cos(angle)*spd, vy:Math.sin(angle)*spd,
+      life: piercing?90:62, color:f.color, size: piercing?3.6:2.1,
+      damage:dmg, piercing:!!piercing, homing:!!homing, owner:f
+    };
+  }
+  function dummyFireWeapon(f, angle, ax, ay){
+    var def=f.def;
+    if(def.beamWeapon){ f.beamActive=66; f.beamAngle=angle; return; }
+    if(def.coneWeapon){
+      dummyGasClouds.push({
+        x:ax, y:ay, angle:angle, range:def.coneRange*0.5, coneAngle:def.coneAngle,
+        life:80, maxLife:80, tickTimer:0, dps:def.coneBaseDPS*0.55, owner:f
+      });
+      return;
+    }
+    if(def.burstCount){ f.burstRemaining=def.burstCount; f.burstAngle=angle; f.burstTimer=0; return; }
+    if(def.bulletsPerShot){
+      for(var k=0;k<def.bulletsPerShot;k++){
+        var a=angle+(k-(def.bulletsPerShot-1)/2)*def.spread;
+        dummyBullets.push(makeDummyBullet(f,ax,ay,a,4,false,false));
+      }
+      return;
+    }
+    if(def.piercing){ dummyBullets.push(makeDummyBullet(f,ax,ay,angle,14,true,false)); return; }
+    if(def.homing){ dummyBullets.push(makeDummyBullet(f,ax,ay,angle,9,false,true)); return; }
+    dummyBullets.push(makeDummyBullet(f,ax,ay,angle,8,false,false));
+  }
+  function dummyFireCooldownFrames(def){
+    if(def.beamWeapon) return 150; // recharge gap after a beam channel
+    if(def.coneWeapon) return Math.max(60, Math.round((def.coneFireRate||1600)/12));
+    return Math.max(18, Math.round((def.fireRate||350)/9));
+  }
+  // Shared hit-resolution for bullets/beam/gas-cloud damage alike -- drops a
+  // pickup-able gem where the target died, exactly like a real kill.
+  function applyDummyDamage(target, amount, tx_, ty_){
+    if(target.hp<=0) return;
+    target.hp -= amount;
+    if(target.hp<=0){
+      target.respawnTimer=90;
+      dummyGem={x:tx_, y:ty_, r:10, pulse:0, alive:true};
+      for(var i=0;i<16;i++){
+        var a=Math.random()*Math.PI*2;
+        dummyParticles.push({x:tx_,y:ty_,vx:Math.cos(a)*3,vy:Math.sin(a)*3,life:1,decay:0.05,color:target.color});
+      }
+    }
+  }
 
   function stepDummyBattle(w,h){
     var fighters=[dummyA,dummyB];
@@ -1356,10 +1431,9 @@ document.getElementById('ytPlay').addEventListener('click',function(){
         continue;
       }
       var o=fighters[1-i];
+      var opponentAlive=o.hp>0;
       var ax=f.fx*w, ay=f.fy*h, ox=o.fx*w, oy=o.fy*h;
       var toOther=angTo(ax,ay,ox,oy);
-      var awayFromOther=angTo(ox,oy,ax,ay);
-      var d=dst(ax,ay,ox,oy);
 
       // Re-roll which way this fighter strafes every couple of seconds,
       // exactly like the real bot AI's aiStrafeDir/aiDecisionTimer -- a
@@ -1368,19 +1442,42 @@ document.getElementById('ytPlay').addEventListener('click',function(){
       f.decisionTimer--;
       if(f.decisionTimer<=0){ f.strafeDir = Math.random()<0.5?1:-1; f.decisionTimer=rndI(40,100); }
 
-      var hpFrac=f.hp/f.maxHp;
-      var moveAngle;
-      if(hpFrac<0.35){
-        // Hurt -- peel off and put some distance between them instead of
-        // trading shots at close range (still faces the threat to fire back).
-        moveAngle=awayFromOther;
+      var moveAngle, faceAngle;
+      if(dummyGem && dummyGem.alive){
+        // A fresh kill dropped a gem -- the survivor collects it, same as a
+        // real kill leaving a gem for whoever's around to pick up.
+        moveAngle=angTo(ax,ay,dummyGem.x,dummyGem.y);
+        faceAngle=moveAngle;
+      } else if(opponentAlive){
+        var awayFromOther=angTo(ox,oy,ax,ay);
+        var d=dst(ax,ay,ox,oy);
+        var hpFrac=f.hp/f.maxHp;
+        var baseAngle;
+        if(hpFrac<0.35){
+          // Hurt -- peel off and put some distance between them instead of
+          // trading shots at close range (still faces the threat to fire back).
+          baseAngle=awayFromOther;
+        } else {
+          var ideal=Math.min(w,h)*0.22;
+          if(d<ideal-20) baseAngle=awayFromOther;
+          else if(d>ideal+20) baseAngle=toOther;
+          else baseAngle=toOther+(Math.PI/2)*f.strafeDir;
+        }
+        // Both fighters start as an exact mirror image of each other (same
+        // spawn distance/angle/hp), and a pure head-on approach/retreat has
+        // zero sideways drift -- without this nudge, two evenly-matched
+        // fighters can stay locked in a perfectly symmetric back-and-forth
+        // that never visibly maneuvers. This fighter's own strafeDir breaks
+        // that symmetry every frame.
+        moveAngle=baseAngle+0.18*f.strafeDir;
+        faceAngle=toOther;
       } else {
-        var ideal=Math.min(w,h)*0.22;
-        if(d<ideal-20) moveAngle=awayFromOther;
-        else if(d>ideal+20) moveAngle=toOther;
-        else moveAngle=toOther+(Math.PI/2)*f.strafeDir;
+        // Opponent is dead/respawning and there's no gem to grab -- loiter.
+        faceAngle=f.angle+f.strafeDir*0.05;
+        moveAngle=faceAngle;
       }
-      f.angle += angDiff(f.angle,toOther)*0.08;
+
+      f.angle += angDiff(f.angle,faceAngle)*0.08;
       f.vx += Math.cos(moveAngle)*0.06; f.vy += Math.sin(moveAngle)*0.06;
       f.vx*=0.94; f.vy*=0.94;
       var sp=Math.sqrt(f.vx*f.vx+f.vy*f.vy), maxSp=1.6;
@@ -1390,33 +1487,93 @@ document.getElementById('ytPlay').addEventListener('click',function(){
       f.fx=ax/w; f.fy=ay/h;
       f.flick++;
 
+      if(dummyGem && dummyGem.alive && dst(ax,ay,dummyGem.x,dummyGem.y) < 16){
+        dummyGem.alive=false;
+        for(var gp=0;gp<10;gp++){
+          var ga=Math.random()*Math.PI*2;
+          dummyParticles.push({x:ax,y:ay,vx:Math.cos(ga)*2.4,vy:Math.sin(ga)*2.4,life:1,decay:0.06,color:'#66eaff'});
+        }
+      }
+
+      if(f.beamActive>0){
+        f.beamActive--;
+        f.beamAngle=f.angle;
+        if(opponentAlive){
+          var bex=ax+Math.cos(f.beamAngle)*260, bey=ay+Math.sin(f.beamAngle)*260;
+          if(distPointToSegment(ox,oy, ax,ay, bex,bey) < 16){
+            applyDummyDamage(o, 0.5, ox, oy);
+            if(f.flick%6===0) dummyParticles.push({x:ox,y:oy,vx:0,vy:0,life:1,decay:0.15,color:f.color});
+          }
+        }
+      }
+
+      if(f.burstRemaining>0){
+        f.burstTimer--;
+        if(f.burstTimer<=0){
+          dummyBullets.push(makeDummyBullet(f,ax,ay,f.burstAngle,4,false,false));
+          f.burstRemaining--;
+          f.burstTimer=4;
+        }
+      }
+
       f.cooldown--;
-      if(f.cooldown<=0 && Math.abs(angDiff(f.angle,toOther))<0.5){
-        dummyBullets.push({x:ax,y:ay,vx:Math.cos(f.angle)*4,vy:Math.sin(f.angle)*4,life:60,color:f.color});
-        f.cooldown=rndI(40,80);
+      if(f.cooldown<=0 && opponentAlive && f.beamActive<=0 && f.burstRemaining<=0 && Math.abs(angDiff(f.angle,toOther))<0.5){
+        dummyFireWeapon(f, f.angle, ax, ay);
+        f.cooldown=dummyFireCooldownFrames(f.def);
       }
     }
 
     for(var bi=dummyBullets.length-1;bi>=0;bi--){
       var b=dummyBullets[bi];
+      if(b.homing){
+        var target = b.owner===dummyA ? dummyB : dummyA;
+        if(target.hp>0){
+          var wantAngle=angTo(b.x,b.y,target.fx*w,target.fy*h);
+          var curAngle=Math.atan2(b.vy,b.vx);
+          var turn=Math.max(-0.06,Math.min(0.06,angDiff(curAngle,wantAngle)));
+          var newAngle=curAngle+turn;
+          var spd=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
+          b.vx=Math.cos(newAngle)*spd; b.vy=Math.sin(newAngle)*spd;
+        }
+      }
       b.x+=b.vx; b.y+=b.vy; b.life--;
       var removed=false;
       for(var fi=0;fi<2;fi++){
         var f=fighters[fi];
-        if(f.hp<=0) continue;
+        // A real bullet never hits its own shooter -- exclude the owner.
+        if(f===b.owner || f.hp<=0) continue;
         var fxp=f.fx*w, fyp=f.fy*h;
         if(dst(b.x,b.y,fxp,fyp) < 14){
-          f.hp -= 8;
+          applyDummyDamage(f, b.damage, fxp, fyp);
           for(var pi=0;pi<5;pi++){
             var a=Math.random()*Math.PI*2;
             dummyParticles.push({x:fxp,y:fyp,vx:Math.cos(a)*2,vy:Math.sin(a)*2,life:1,decay:0.06,color:f.color});
           }
-          if(f.hp<=0) f.respawnTimer=90;
-          removed=true;
+          if(!b.piercing) removed=true;
           break;
         }
       }
       if(removed || b.life<=0 || b.x<0||b.x>w||b.y<0||b.y>h) dummyBullets.splice(bi,1);
+    }
+
+    for(var ci=dummyGasClouds.length-1;ci>=0;ci--){
+      var c=dummyGasClouds[ci];
+      c.life--;
+      if(c.life<=0){ dummyGasClouds.splice(ci,1); continue; }
+      c.tickTimer--;
+      var doTick=c.tickTimer<=0;
+      if(doTick) c.tickTimer=14;
+      for(var fi2=0;fi2<2;fi2++){
+        var f2=fighters[fi2];
+        if(f2===c.owner || f2.hp<=0) continue;
+        var fxp2=f2.fx*w, fyp2=f2.fy*h;
+        if(dst(c.x,c.y,fxp2,fyp2)>c.range) continue;
+        if(Math.abs(angDiff(c.angle,angTo(c.x,c.y,fxp2,fyp2)))>c.coneAngle/2) continue;
+        if(doTick){
+          applyDummyDamage(f2, c.dps*0.25, fxp2, fyp2);
+          dummyParticles.push({x:fxp2,y:fyp2,vx:0,vy:0,life:1,decay:0.1,color:'#b060ff'});
+        }
+      }
     }
 
     for(var pi2=dummyParticles.length-1;pi2>=0;pi2--){
@@ -1424,22 +1581,71 @@ document.getElementById('ytPlay').addEventListener('click',function(){
       p.x+=p.vx; p.y+=p.vy; p.vx*=0.92; p.vy*=0.92; p.life-=p.decay;
       if(p.life<=0) dummyParticles.splice(pi2,1);
     }
+
+    if(dummyGem){
+      if(!dummyGem.alive) dummyGem=null;
+      else dummyGem.pulse+=0.05;
+    }
   }
 
   function drawDummyBattle(w,h){
+    for(var ci=0;ci<dummyGasClouds.length;ci++){
+      var c=dummyGasClouds[ci];
+      tx.save();
+      tx.translate(c.x,c.y);
+      tx.rotate(c.angle);
+      tx.beginPath();
+      tx.moveTo(0,0);
+      tx.arc(0,0,c.range,-c.coneAngle/2,c.coneAngle/2);
+      tx.closePath();
+      tx.fillStyle='rgba(176,96,255,'+(0.22*(c.life/c.maxLife))+')';
+      tx.fill();
+      tx.restore();
+    }
+
     for(var i=0;i<dummyBullets.length;i++){
       var b=dummyBullets[i];
-      tx.beginPath(); tx.arc(b.x,b.y,2,0,Math.PI*2);
-      tx.fillStyle=b.color; tx.shadowColor=b.color; tx.shadowBlur=6; tx.fill();
+      tx.beginPath(); tx.arc(b.x,b.y,b.size||2,0,Math.PI*2);
+      tx.fillStyle=b.color; tx.shadowColor=b.color; tx.shadowBlur=b.piercing?10:6; tx.fill();
     }
     tx.shadowBlur=0;
+
+    var fighters=[dummyA,dummyB];
+    for(var i=0;i<2;i++){
+      var f=fighters[i];
+      if(f.hp<=0 || f.beamActive<=0) continue;
+      var ax=f.fx*w, ay=f.fy*h;
+      var ex=ax+Math.cos(f.beamAngle)*260, ey=ay+Math.sin(f.beamAngle)*260;
+      tx.save();
+      tx.strokeStyle=f.color; tx.shadowColor=f.color; tx.shadowBlur=12;
+      tx.lineWidth=3; tx.globalAlpha=0.85;
+      tx.beginPath(); tx.moveTo(ax,ay); tx.lineTo(ex,ey); tx.stroke();
+      tx.restore();
+    }
+    tx.globalAlpha=1; tx.shadowBlur=0;
+
     for(var i=0;i<dummyParticles.length;i++){
       var p=dummyParticles[i];
       tx.beginPath(); tx.arc(p.x,p.y,Math.max(0.1,2*p.life),0,Math.PI*2);
       tx.fillStyle=p.color; tx.globalAlpha=Math.max(0,p.life); tx.fill();
     }
     tx.globalAlpha=1;
-    var fighters=[dummyA,dummyB];
+
+    if(dummyGem && dummyGem.alive){
+      var gp=0.85+0.15*Math.sin(dummyGem.pulse);
+      tx.save();
+      tx.translate(dummyGem.x,dummyGem.y);
+      tx.rotate(dummyGem.pulse*0.6);
+      tx.shadowColor='#66eaff'; tx.shadowBlur=14;
+      tx.fillStyle='rgba(102,234,255,0.85)';
+      tx.strokeStyle='#ffffff'; tx.lineWidth=1.5;
+      tx.beginPath();
+      tx.moveTo(0,-10*gp); tx.lineTo(7*gp,0); tx.lineTo(0,10*gp); tx.lineTo(-7*gp,0);
+      tx.closePath();
+      tx.fill(); tx.stroke();
+      tx.restore();
+    }
+
     for(var i=0;i<2;i++){
       var f=fighters[i];
       if(f.hp<=0) continue;
