@@ -6,7 +6,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<title>SPACE RANGERS ARENA</title>
+<title>SPACE RANGER BATTLE</title>
 <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet">
 <script src="https://www.youtube.com/iframe_api"></script>
 <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
@@ -85,6 +85,9 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 #selectScreen{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,rgba(0,80,120,0.18),transparent 60%),#000;z-index:90;display:none;flex-direction:column;align-items:center;padding:20px;overflow-y:auto;}
 #selectScreen h1{font-size:26px;font-weight:900;letter-spacing:4px;color:#00d4ff;text-shadow:0 0 8px rgba(0,212,255,0.6);margin-top:10px;text-align:center;}
 #selectSub{font-size:10px;letter-spacing:3px;color:rgba(0,212,255,0.45);margin-top:6px;margin-bottom:18px;text-align:center;text-transform:uppercase;}
+#modeToggleRow{display:flex;gap:8px;margin-bottom:14px;}
+.modeToggleBtn{background:transparent;border:1px solid rgba(0,212,255,0.35);color:rgba(102,234,255,0.6);font-family:inherit;font-weight:700;letter-spacing:1.5px;font-size:10px;padding:8px 16px;border-radius:6px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+.modeToggleBtn.active{background:rgba(0,212,255,0.15);border-color:#00d4ff;color:#00d4ff;}
 #carousel{position:relative;display:flex;align-items:center;justify-content:center;gap:4px;width:100%;max-width:520px;}
 #carouselTrack{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;overflow:hidden;padding:8px 0;touch-action:pan-y;}
 .carouselArrow{flex-shrink:0;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.35);color:#66eaff;width:32px;height:32px;min-width:32px;border-radius:50%;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;}
@@ -171,16 +174,18 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
     <div id="shieldBar"><div id="shieldFill" style="width:100%"></div></div>
     <div class="hud-lbl" style="margin-top:6px;">SHIP</div>
     <div class="hud-val" id="shipNameVal" style="font-size:13px;">-</div>
-    <div class="hud-lbl" style="margin-top:6px;">GEMS</div>
+    <div class="hud-lbl" id="gemLbl" style="margin-top:6px;">GEMS</div>
     <div class="hud-val" id="gemVal" style="font-size:14px;color:#66eaff;text-shadow:0 0 12px rgba(102,234,255,0.6);">0/3</div>
     <div class="hud-lbl" style="margin-top:6px;">AMMO</div>
     <div class="hud-val" id="ammoVal" style="font-size:16px;color:#ffb020;text-shadow:0 0 10px rgba(255,176,32,0.6);">&#9679; &#9679; &#9679;</div>
   </div>
   <div id="hudRight">
-    <div class="hud-lbl">BOTS DOWNED</div>
+    <div class="hud-lbl" id="killLbl">BOTS DOWNED</div>
     <div class="hud-val" id="killVal">0</div>
-    <div class="hud-lbl" style="margin-top:6px;">REMAINING</div>
+    <div class="hud-lbl" id="remainLbl" style="margin-top:6px;">REMAINING</div>
     <div class="hud-val" id="remainVal" style="font-size:14px;">6</div>
+    <div class="hud-lbl" id="coresLbl" style="margin-top:6px;display:none;">CORES -- YOU / ENEMY</div>
+    <div class="hud-val" id="coresVal" style="font-size:14px;color:#00d4ff;text-shadow:0 0 10px rgba(0,212,255,0.6);display:none;">0/3 -- 0/3</div>
   </div>
 </div>
 
@@ -224,7 +229,7 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 
 <div id="audioPermModal">
   <div id="audioPermCard">
-    <h2>SPACE RANGERS</h2>
+    <h2>SPACE RANGER BATTLE</h2>
     <p>Enable audio for music and sound effects.</p>
     <p class="hint">Toggle anytime via the settings menu</p>
     <div class="permBtns">
@@ -237,8 +242,12 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 <div id="ytPlayerContainer" style="position:fixed;left:-220px;bottom:0;width:200px;height:200px;pointer-events:none;"></div>
 
 <div id="selectScreen">
-  <h1>SPACE RANGERS</h1>
+  <h1>SPACE RANGER BATTLE</h1>
   <div id="selectSub">Choose your ranger -- Arena Protocol</div>
+  <div id="modeToggleRow">
+    <button class="modeToggleBtn active" id="modeArenaBtn">BATTLE ARENA</button>
+    <button class="modeToggleBtn" id="modeWarpBtn">WARP CORE</button>
+  </div>
   <div id="gemBankRow"><span class="gicon">&#9670;</span>HANGAR CHEST: <span id="gemBankVal">0</span> GEMS</div>
   <div id="carousel">
     <button id="carouselLeftBtn" class="carouselArrow" aria-label="Previous ship">&#10094;</button>
@@ -283,7 +292,7 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 
 <div id="joinScreen">
   <div id="joinCard">
-    <h2>SPACE RANGERS</h2>
+    <h2>SPACE RANGER BATTLE</h2>
     <div id="joinStatus">Connecting...</div>
   </div>
 </div>
@@ -635,6 +644,10 @@ function placeNebulaClouds(){
     if(dst(x,y,WW/2,WH/2) < 260+r) continue; // keep clear of the player start
     if(dst(x,y,shieldStation.x,shieldStation.y) < shieldStation.r+r+40) continue;
     var clash=false;
+    for(var wb=0;wb<warpBases.length;wb++){
+      if(dst(x,y,warpBases[wb].x,warpBases[wb].y) < r+120){ clash=true; break; }
+    }
+    if(clash) continue;
     for(var i=0;i<obstacles.length;i++){
       if(circleRectHit(x,y,r+20,obstacles[i])){ clash=true; break; }
     }
@@ -704,6 +717,162 @@ function nebulaHealMultiplier(ent){
 }
 
 /* =====================================================================
+   WARP CORE MODE -- alternate 3v3 team objective mode. Two bases (Team A
+   = you + 2 AI allies, Team B = 3 AI enemies), each with 3 delivery slots.
+   Each team's 3 warp cores are hidden in the OPPOSING team's territory,
+   concealed like a nebula cloud until a ship gets close. First team to
+   fill all 3 of its own slots wins. Every array here stays empty and every
+   check is naturally a no-op whenever gameMode!=='warpcore', so none of
+   this touches Battle Arena mode.
+===================================================================== */
+var WARP_BASE_A={x:350, y:WH-350};
+var WARP_BASE_B={x:WW-350, y:350};
+var WARP_CORE_DETECT_RANGE=260; // wider than NEBULA_DETECT_RANGE -- finding a pinpoint object across half the map at 150 would drag matches out
+var warpBases=[]; // [{team,x,y,slots:[{x,y,filled}x3]}, ...]
+var warpCores=[]; // [{team,x,y,carriedBy,delivered}, ...] -- team is the *home* team this core is destined for
+
+function teamBase(team){ return team==='A' ? WARP_BASE_A : WARP_BASE_B; }
+function otherTeam(team){ return team==='A' ? 'B' : 'A'; }
+
+function placeWarpBases(){
+  warpBases=[];
+  ['A','B'].forEach(function(team){
+    var base=teamBase(team);
+    var slots=[];
+    for(var i=0;i<3;i++){
+      var a=(i/3)*Math.PI*2;
+      slots.push({x:base.x+Math.cos(a)*46, y:base.y+Math.sin(a)*46, filled:false});
+    }
+    warpBases.push({team:team, x:base.x, y:base.y, slots:slots});
+  });
+}
+
+// Scatters a team's 3 needed cores in the OPPOSING team's territory (closer
+// to the other base than to their own), clear of obstacles/bases/each
+// other -- same random-with-retry pattern as placeNebulaClouds.
+function placeWarpCores(){
+  warpCores=[];
+  ['A','B'].forEach(function(homeTeam){
+    var ownBase=teamBase(homeTeam), enemyBase=teamBase(otherTeam(homeTeam));
+    for(var n=0;n<3;n++){
+      var x,y,ok,tries=0;
+      do{
+        x=rnd(200, WW-200); y=rnd(200, WH-200);
+        ok = dst(x,y,enemyBase.x,enemyBase.y) < dst(x,y,ownBase.x,ownBase.y);
+        ok = ok && dst(x,y,ownBase.x,ownBase.y) > 300 && dst(x,y,enemyBase.x,enemyBase.y) > 200;
+        if(ok){
+          for(var i=0;i<obstacles.length;i++){
+            if(circleRectHit(x,y,40,obstacles[i])){ ok=false; break; }
+          }
+        }
+        if(ok){
+          for(var i=0;i<warpCores.length;i++){
+            if(dst(x,y,warpCores[i].x,warpCores[i].y) < 150){ ok=false; break; }
+          }
+        }
+        tries++;
+      } while(!ok && tries<60);
+      warpCores.push({team:homeTeam, x:x, y:y, carriedBy:null, delivered:false});
+    }
+  });
+}
+
+function teamSpawnPoint(team){
+  var base=teamBase(team);
+  return {x:clamp(base.x+rnd(-150,150), 100, WW-100), y:clamp(base.y+rnd(-150,150), 100, WH-100)};
+}
+
+// A core is "hidden" exactly like a concealed ship -- undetectable beyond
+// WARP_CORE_DETECT_RANGE unless it's being carried, in which case it's
+// just wherever its carrier is, subject to the carrier's own normal
+// concealment rules (not hidden a second time).
+function isCoreDetectableBy(observer, core){
+  if(core.carriedBy) return isDetectableBy(observer, core.carriedBy);
+  return dst(observer.x,observer.y,core.x,core.y) <= WARP_CORE_DETECT_RANGE;
+}
+function isCoreVisibleToViewer(core){
+  if(core.carriedBy) return isVisibleToViewer(core.carriedBy);
+  return dst(player.x,player.y,core.x,core.y) <= WARP_CORE_DETECT_RANGE;
+}
+
+// Nearest core this ship's own team still needs (not yet carried or
+// delivered) that this ship can currently detect.
+function findNearestFetchableCore(b){
+  var best=null, bestD=Infinity;
+  for(var i=0;i<warpCores.length;i++){
+    var c=warpCores[i];
+    if(c.delivered || c.carriedBy || c.team!==b.team) continue;
+    if(!isCoreDetectableBy(b,c)) continue;
+    var d=dst(b.x,b.y,c.x,c.y);
+    if(d<bestD){ bestD=d; best=c; }
+  }
+  return best;
+}
+
+function warpBaseFilledCount(team){
+  var base=warpBases.filter(function(bb){ return bb.team===team; })[0];
+  if(!base) return 0;
+  var n=0;
+  for(var i=0;i<base.slots.length;i++) if(base.slots[i].filled) n++;
+  return n;
+}
+
+// Per-frame pickup/deliver contact checks for every living ship -- mirrors
+// the existing gem pickup-on-contact pattern. Only a core's own home team
+// can pick it up at all (an off-team ship just flies past it) -- once
+// carried, a core is always actively progressing toward delivery or about
+// to be dropped back on death, so a core can never end up permanently
+// stuck in dead-weight enemy hands with no way back into play.
+function updateWarpCores(dt){
+  var all=allShips();
+  for(var i=0;i<all.length;i++){
+    var e=all[i];
+    if(!e.alive) continue;
+    for(var ci=0;ci<warpCores.length;ci++){
+      var c=warpCores[ci];
+      if(c.delivered || c.carriedBy || c.team!==e.team) continue;
+      if(dst(e.x,e.y,c.x,c.y) < e.r+14){
+        c.carriedBy=e;
+        e.carryingCores.push(c);
+      }
+    }
+    if(e.carryingCores.length){
+      var base=warpBases.filter(function(bb){ return bb.team===e.team; })[0];
+      if(base){
+        for(var k=e.carryingCores.length-1;k>=0;k--){
+          var core=e.carryingCores[k];
+          for(var si=0;si<base.slots.length;si++){
+            var slot=base.slots[si];
+            if(slot.filled) continue;
+            if(dst(e.x,e.y,slot.x,slot.y) < e.r+18){
+              slot.filled=true;
+              core.delivered=true;
+              e.carryingCores.splice(k,1);
+              if(e===player) showAlert('WARP CORE DELIVERED', 1800);
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// Drops every core `ent` is holding right where it died -- mirrors the
+// existing carryingGems drop-on-kill behavior exactly (called from all
+// three kill-handling sites: updateBullets, updateBeamWeapon,
+// updateGasClouds). A no-op whenever carryingCores is empty, which is
+// always true outside Warp Core mode.
+function dropCarriedCores(ent){
+  if(!ent.carryingCores || !ent.carryingCores.length) return;
+  for(var i=0;i<ent.carryingCores.length;i++){
+    var c=ent.carryingCores[i];
+    c.carriedBy=null; c.x=ent.x; c.y=ent.y;
+  }
+  ent.carryingCores=[];
+}
+
+/* =====================================================================
    GAS CLOUDS -- Nebula ship's regular weapon. Each trigger pull spawns one
    stationary cone-shaped patch of nebula gas anchored at the firing ship's
    position/facing at that instant (it does NOT track the shooter afterward
@@ -745,7 +914,7 @@ function updateGasClouds(dt){
     var all=allShips(), stillInside=[];
     for(var j=0;j<all.length;j++){
       var e=all[j];
-      if(!e.alive || e===c.owner || e.invincible>0) continue;
+      if(!e.alive || e===c.owner || e.invincible>0 || !isEnemyOf(c.owner,e)) continue;
       var d=dst(c.x,c.y,e.x,e.y);
       if(d>c.range) continue;
       var ang=angTo(c.x,c.y,e.x,e.y);
@@ -767,6 +936,7 @@ function updateGasClouds(dt){
           e.alive=false;
           spawnBurst(e.x,e.y,e.def.color,28);
           sfxShipExplosion();
+          dropCarriedCores(e);
           if(!e.isPlayer && (c.owner===player || c.owner===remotePlayer)){
             killCount++;
             spawnGem(e.x, e.y);
@@ -1095,6 +1265,115 @@ document.getElementById('ytPlay').addEventListener('click',function(){
     a:Math.random()*0.5+0.4, tw:Math.random()*Math.PI*2, ts:Math.random()*0.003+0.0005
   });
 
+  // ---------------------------------------------------------------------
+  // Decorative background skirmish -- two AI-controlled dummy fighters that
+  // chase, strafe, and shoot each other in a band below the logo, purely
+  // for atmosphere. Entirely self-contained (own local bullets/particles,
+  // fractional x/y so it survives resize) -- never touches the real
+  // match's bots/player/bullets/particles arrays, so it carries zero risk
+  // to actual gameplay and simply stops costing CPU once the title screen
+  // loop is cancelled in proceed().
+  // ---------------------------------------------------------------------
+  function resetDummyFighter(f,sign){
+    var def=SHIPS[rndI(0,SHIPS.length-1)];
+    f.fx = sign<0 ? 0.30 : 0.70; f.fy=0.79;
+    f.vx=0; f.vy=0; f.angle = sign<0 ? 0 : Math.PI;
+    f.hp=40; f.maxHp=40; f.color=def.color; f.shipId=def.id;
+    f.cooldown=rndI(30,90); f.respawnTimer=0; f.flick=Math.random()*100;
+  }
+  var dummyA={}, dummyB={};
+  resetDummyFighter(dummyA,-1);
+  resetDummyFighter(dummyB,1);
+  var dummyBullets=[], dummyParticles=[];
+
+  function stepDummyBattle(w,h){
+    var fighters=[dummyA,dummyB];
+    for(var i=0;i<2;i++){
+      var f=fighters[i];
+      if(f.hp<=0){
+        f.respawnTimer--;
+        if(f.respawnTimer<=0) resetDummyFighter(f, i===0?-1:1);
+        continue;
+      }
+      var o=fighters[1-i];
+      var ax=f.fx*w, ay=f.fy*h, ox=o.fx*w, oy=o.fy*h;
+      var toOther=angTo(ax,ay,ox,oy);
+      var d=dst(ax,ay,ox,oy);
+      var ideal=Math.min(w,h)*0.22;
+      var moveAngle=toOther;
+      if(d<ideal-20) moveAngle=toOther+Math.PI;
+      else if(d<=ideal+20) moveAngle=toOther+(Math.PI/2)*(i===0?1:-1);
+      f.angle += angDiff(f.angle,toOther)*0.08;
+      f.vx += Math.cos(moveAngle)*0.06; f.vy += Math.sin(moveAngle)*0.06;
+      f.vx*=0.94; f.vy*=0.94;
+      var sp=Math.sqrt(f.vx*f.vx+f.vy*f.vy), maxSp=1.6;
+      if(sp>maxSp){ f.vx=f.vx/sp*maxSp; f.vy=f.vy/sp*maxSp; }
+      ax+=f.vx; ay+=f.vy;
+      ax=clamp(ax, w*0.18, w*0.82); ay=clamp(ay, h*0.66, h*0.94);
+      f.fx=ax/w; f.fy=ay/h;
+      f.flick++;
+
+      f.cooldown--;
+      if(f.cooldown<=0 && Math.abs(angDiff(f.angle,toOther))<0.5){
+        dummyBullets.push({x:ax,y:ay,vx:Math.cos(f.angle)*4,vy:Math.sin(f.angle)*4,life:60,color:f.color});
+        f.cooldown=rndI(40,80);
+      }
+    }
+
+    for(var bi=dummyBullets.length-1;bi>=0;bi--){
+      var b=dummyBullets[bi];
+      b.x+=b.vx; b.y+=b.vy; b.life--;
+      var removed=false;
+      for(var fi=0;fi<2;fi++){
+        var f=fighters[fi];
+        if(f.hp<=0) continue;
+        var fxp=f.fx*w, fyp=f.fy*h;
+        if(dst(b.x,b.y,fxp,fyp) < 14){
+          f.hp -= 8;
+          for(var pi=0;pi<5;pi++){
+            var a=Math.random()*Math.PI*2;
+            dummyParticles.push({x:fxp,y:fyp,vx:Math.cos(a)*2,vy:Math.sin(a)*2,life:1,decay:0.06,color:f.color});
+          }
+          if(f.hp<=0) f.respawnTimer=90;
+          removed=true;
+          break;
+        }
+      }
+      if(removed || b.life<=0 || b.x<0||b.x>w||b.y<0||b.y>h) dummyBullets.splice(bi,1);
+    }
+
+    for(var pi2=dummyParticles.length-1;pi2>=0;pi2--){
+      var p=dummyParticles[pi2];
+      p.x+=p.vx; p.y+=p.vy; p.vx*=0.92; p.vy*=0.92; p.life-=p.decay;
+      if(p.life<=0) dummyParticles.splice(pi2,1);
+    }
+  }
+
+  function drawDummyBattle(w,h){
+    for(var i=0;i<dummyBullets.length;i++){
+      var b=dummyBullets[i];
+      tx.beginPath(); tx.arc(b.x,b.y,2,0,Math.PI*2);
+      tx.fillStyle=b.color; tx.shadowColor=b.color; tx.shadowBlur=6; tx.fill();
+    }
+    tx.shadowBlur=0;
+    for(var i=0;i<dummyParticles.length;i++){
+      var p=dummyParticles[i];
+      tx.beginPath(); tx.arc(p.x,p.y,Math.max(0.1,2*p.life),0,Math.PI*2);
+      tx.fillStyle=p.color; tx.globalAlpha=Math.max(0,p.life); tx.fill();
+    }
+    tx.globalAlpha=1;
+    var fighters=[dummyA,dummyB];
+    for(var i=0;i<2;i++){
+      var f=fighters[i];
+      if(f.hp<=0) continue;
+      var fxp=f.fx*w, fyp=f.fy*h;
+      drawShipGlyph(tx, fxp, fyp, 0.85, f.color, f.flick, f.shipId);
+      var barW=26, bx=fxp-barW/2, by=fyp+16;
+      tx.fillStyle='rgba(0,0,0,0.4)'; tx.fillRect(bx,by,barW,3);
+      tx.fillStyle=f.color; tx.fillRect(bx,by,barW*Math.max(0,f.hp/f.maxHp),3);
+    }
+  }
+
   function drawTitle(){
     var w=tc.width, h=tc.height;
     tx.clearRect(0,0,w,h);
@@ -1115,9 +1394,9 @@ document.getElementById('ytPlay').addEventListener('click',function(){
     tx.translate(w/2, h*0.36);
     tx.rotate(-0.045);
 
-    var fs=Math.min(w*0.13, h*0.10, 58);
+    var fs=Math.min(w*0.11, h*0.085, 50);
     var lineGap=fs*1.15;
-    var lines=['SPACE','RANGERS'];
+    var lines=['SPACE','RANGER','BATTLE'];
     tx.textAlign='center'; tx.textBaseline='middle';
 
     for(var li=0;li<lines.length;li++){
@@ -1150,7 +1429,7 @@ document.getElementById('ytPlay').addEventListener('click',function(){
     }
     tx.restore();
 
-    var subY=h*0.36+lineGap*1.3;
+    var subY=h*0.36+(lines.length-1)/2*lineGap+fs*1.0;
     var subFs=Math.min(w*0.026,12);
     tx.save();
     tx.font='bold '+subFs+'px Orbitron,monospace';
@@ -1161,6 +1440,9 @@ document.getElementById('ytPlay').addEventListener('click',function(){
     tx.fillText('CLEAR THE SECTOR.',w/2,subY);
     tx.fillText('DOWN THE BOTS.',w/2,subY+subFs*1.9);
     tx.restore();
+
+    stepDummyBattle(w,h);
+    drawDummyBattle(w,h);
 
     raf=requestAnimationFrame(drawTitle);
   }
@@ -1428,9 +1710,21 @@ function showSelectScreen(){
     return;
   }
   document.getElementById('selectScreen').style.display='flex';
-  document.getElementById('inviteFriendBtn').style.display = netRole==='guest' ? 'none' : 'inline-block';
+  // Warp Core is solo-only for now -- multiplayer sessions never see the
+  // mode toggle and always play Battle Arena.
+  document.getElementById('modeToggleRow').style.display = netRole ? 'none' : 'flex';
+  if(netRole) setGameMode('arena');
+  document.getElementById('inviteFriendBtn').style.display = (netRole==='guest' || gameMode==='warpcore') ? 'none' : 'inline-block';
   updateDetail();
 }
+function setGameMode(mode){
+  gameMode=mode;
+  document.getElementById('modeArenaBtn').classList.toggle('active', mode==='arena');
+  document.getElementById('modeWarpBtn').classList.toggle('active', mode==='warpcore');
+  document.getElementById('inviteFriendBtn').style.display = (netRole==='guest' || mode==='warpcore') ? 'none' : 'inline-block';
+}
+document.getElementById('modeArenaBtn').addEventListener('click',function(){ setGameMode('arena'); });
+document.getElementById('modeWarpBtn').addEventListener('click',function(){ setGameMode('warpcore'); });
 document.getElementById('launchBtn').addEventListener('click',function(){
   if(netRole==='guest'){
     document.getElementById('selectScreen').style.display='none';
@@ -1440,7 +1734,8 @@ document.getElementById('launchBtn').addEventListener('click',function(){
     return;
   }
   document.getElementById('selectScreen').style.display='none';
-  startGame();
+  if(gameMode==='warpcore') startWarpCoreGame();
+  else startGame();
 });
 document.getElementById('inviteFriendBtn').addEventListener('click',function(){
   document.getElementById('inviteModalOverlay').classList.add('show');
@@ -1478,6 +1773,12 @@ var player, bots=[], bullets=[], particles=[], gems=[];
 var turrets=[]; // Seraph deputy turrets -- see spawnTurret/updateTurrets
 var killCount=0, gameActive=false, alertTimer=0, lastTime=0;
 var TOTAL_BOTS=6;
+var gameMode='arena'; // 'arena' (default Battle Arena) | 'warpcore'
+// Whether `a` and `b` are opposing sides right now. A no-op (always true,
+// preserving the existing free-for-all behavior) outside Warp Core mode --
+// every targeting/friendly-fire check in the game adds this as an EXTRA
+// condition, never a replacement, so Battle Arena mode is unaffected.
+function isEnemyOf(a,b){ return gameMode!=='warpcore' || a.team!==b.team; }
 
 // Host-only: the connected guest's ship, simulated alongside `player` and
 // `bots` but never touched by updateBotAI. Null when playing solo or on
@@ -1520,7 +1821,9 @@ function makeShipEntity(def,x,y,isPlayer){
     beamActive:0, beamAngle:0, beamTickTimer:0, beamRangeNow:0, // beam-weapon (Bruiser) channel state
     comboStreak:0, // consecutive landed hits from this ship's own comboDamage-eligible bullets
     anchoredTimer:0, // Deadeye's Anchor debuff: >0 while this ship's max speed is halved
-    concealed:false, revealTimer:0 // nebula cloud concealment state
+    concealed:false, revealTimer:0, // nebula cloud concealment state
+    team:null, // 'A'|'B' in Warp Core mode; unused (always null) in Battle Arena
+    carryingCores:[] // Warp Core mode: warp cores this ship is currently holding
   };
 }
 
@@ -1540,7 +1843,7 @@ function makeRemoteShipEntity(def,x,y,levels){
 // Occasionally re-rolls its ship type so the roster stays varied.
 function respawnBot(b){
   var newDef = Math.random()<0.4 ? SHIPS[rndI(0,SHIPS.length-1)] : b.def;
-  var sp=randomSpawnPoint();
+  var sp = (gameMode==='warpcore' && b.team) ? teamSpawnPoint(b.team) : randomSpawnPoint();
   b.def=newDef;
   b.x=sp.x; b.y=sp.y;
   b.vx=0; b.vy=0; b.angle=rnd(0,Math.PI*2);
@@ -1550,6 +1853,7 @@ function respawnBot(b){
   b.aiState='seek'; b.carryingGems=0; b.respawnTimer=0; b.idleTimer=0;
   b.ammo=MAX_AMMO; b.ammoRegenTimer=0; b.abilityCharge=1; b.hitStreak=0;
   b.comboStreak=0; b.anchoredTimer=0; b.concealed=false; b.revealTimer=0;
+  b.carryingCores=[]; // team is left untouched -- a respawned bot stays on its own side
 }
 
 function showAlert(txt,dur){
@@ -1648,7 +1952,7 @@ function updateBeamWeapon(ent, dt){
   var all=allShips();
   for(var i=0;i<all.length;i++){
     var tgt=all[i];
-    if(tgt===ent || !tgt.alive || tgt.invincible>0) continue;
+    if(tgt===ent || !tgt.alive || tgt.invincible>0 || !isEnemyOf(ent,tgt)) continue;
     if(distPointToSegment(tgt.x,tgt.y, ent.x,ent.y, ex,ey) > tgt.r+6) continue;
 
     tgt.hp -= tickDamage;
@@ -1670,6 +1974,7 @@ function updateBeamWeapon(ent, dt){
       tgt.alive=false;
       spawnBurst(tgt.x,tgt.y,tgt.def.color,28);
       sfxShipExplosion();
+      dropCarriedCores(tgt);
       if(!tgt.isPlayer && (ent===player || ent===remotePlayer)){
         killCount++;
         spawnGem(tgt.x, tgt.y);
@@ -1752,7 +2057,7 @@ function nearestEnemyInFront(ent, range, coneHalfAngle){
   var all=allShips(), best=null, bestD=Infinity;
   for(var i=0;i<all.length;i++){
     var e=all[i];
-    if(!e.alive || e===ent) continue;
+    if(!e.alive || e===ent || !isEnemyOf(ent,e)) continue;
     var d=dst(ent.x,ent.y,e.x,e.y);
     if(d>range) continue;
     var ang=angTo(ent.x,ent.y,e.x,e.y);
@@ -1858,7 +2163,7 @@ function nearestEnemyOfTurret(t){
   var all=allShips(), best=null, bestD=Infinity;
   for(var i=0;i<all.length;i++){
     var e=all[i];
-    if(!e.alive || e===t.ownerEnt) continue;
+    if(!e.alive || e===t.ownerEnt || !isEnemyOf(t.ownerEnt,e)) continue;
     if(!isDetectableBy(t,e)) continue;
     var d=dst(t.x,t.y,e.x,e.y);
     if(d<bestD){ bestD=d; best=e; }
@@ -2350,6 +2655,59 @@ function startGame(){
   lastTime=performance.now();
 }
 
+// Warp Core mode: solo-only 3v3 team objective match. Player + 2 AI allies
+// (Team A) vs 3 AI enemies (Team B); the map furniture (obstacles, shield
+// station, nebula clouds) is generated exactly like Battle Arena, just
+// with the two bases placed first so it's all kept clear of them.
+function startWarpCoreGame(){
+  genObstacles();
+  placeShieldStation();
+  placeWarpBases();
+  placeNebulaClouds();
+  placeWarpCores();
+
+  var pSpawn=teamSpawnPoint('A');
+  player=makeShipEntity(selectedShip, pSpawn.x, pSpawn.y, true);
+  player.team='A';
+  player.angle=angTo(pSpawn.x,pSpawn.y,WARP_BASE_B.x,WARP_BASE_B.y);
+  player.invincible=1500;
+  bots=[]; bullets=[]; particles=[]; gems=[]; turrets=[]; gasClouds=[]; killCount=0;
+  gemsCollectedThisMatch=0;
+  remotePlayer=null;
+  lastGuestInput={turnLeft:false, turnRight:false, thrustOn:false, fireOn:false};
+
+  document.getElementById('shipNameVal').textContent=selectedShip.name;
+  document.getElementById('shipNameVal').style.color=selectedShip.color;
+  document.getElementById('abilityIcon').textContent=selectedShip.ability.icon;
+
+  for(var i=0;i<2;i++){
+    var sp=teamSpawnPoint('A');
+    var b=makeShipEntity(SHIPS[rndI(0,SHIPS.length-1)], sp.x, sp.y, false);
+    b.team='A'; b.hp *= 0.85; b.maxHp=b.hp;
+    bots.push(b);
+  }
+  for(var i=0;i<3;i++){
+    var sp2=teamSpawnPoint('B');
+    var b2=makeShipEntity(SHIPS[rndI(0,SHIPS.length-1)], sp2.x, sp2.y, false);
+    b2.team='B'; b2.hp *= 0.85; b2.maxHp=b2.hp;
+    bots.push(b2);
+  }
+
+  document.getElementById('hud').style.display='flex';
+  document.getElementById('minimap').style.display='block';
+  document.getElementById('abilityBtn').style.display='flex';
+  document.getElementById('abilityLbl').style.display='block';
+  document.getElementById('gameOverScreen').classList.add('hidden');
+  positionAbilityUI();
+
+  CAM.x=player.x; CAM.y=player.y; CAM.zoom=0.62; targetZoom=0.62; manualZoom=0.62;
+
+  killCount=0;
+  updateHUD();
+  gameActive=true;
+  lastTime=performance.now();
+}
+
 function positionAbilityUI(){
   var ab=document.getElementById('abilityBtn');
   var al=document.getElementById('abilityLbl');
@@ -2391,6 +2749,15 @@ function endGame(won, reason, customTitle, customSub){
   if(customTitle){
     t.textContent=customTitle; t.style.color='#66eaff';
     s.textContent=customSub||'';
+  } else if(reason==='warpcoreWon'){
+    t.textContent='CORES SECURED'; t.style.color='#44ff88';
+    s.textContent='Your team delivered all 3 warp cores home first!';
+  } else if(reason==='warpcoreLost'){
+    t.textContent='OUTRUN'; t.style.color='#ff4444';
+    s.textContent='The enemy team delivered their 3 warp cores first.';
+  } else if(reason==='warpcoreDied'){
+    t.textContent='HULL BREACH'; t.style.color='#ff4444';
+    s.textContent='You fell before your team could finish the delivery.';
   } else if(won){
     t.textContent='VICTORY'; t.style.color='#44ff88';
     if(gemsCollectedThisMatch>=GEMS_TO_WIN){
@@ -2430,6 +2797,19 @@ function updateHUD(){
   for(var i=0;i<bots.length;i++) if(bots[i].alive) remaining++;
   document.getElementById('remainVal').textContent=remaining;
   document.getElementById('gemVal').textContent=gemsCollectedThisMatch+'/'+GEMS_TO_WIN;
+
+  var isWarpCore = gameMode==='warpcore';
+  document.getElementById('killLbl').style.display = isWarpCore ? 'none' : '';
+  document.getElementById('killVal').style.display = isWarpCore ? 'none' : '';
+  document.getElementById('remainLbl').style.display = isWarpCore ? 'none' : '';
+  document.getElementById('remainVal').style.display = isWarpCore ? 'none' : '';
+  document.getElementById('gemLbl').style.display = isWarpCore ? 'none' : '';
+  document.getElementById('gemVal').style.display = isWarpCore ? 'none' : '';
+  document.getElementById('coresLbl').style.display = isWarpCore ? '' : 'none';
+  document.getElementById('coresVal').style.display = isWarpCore ? '' : 'none';
+  if(isWarpCore){
+    document.getElementById('coresVal').textContent = warpBaseFilledCount('A')+'/3 -- '+warpBaseFilledCount('B')+'/3';
+  }
 
   // Ammo pips: filled dot per available shot, empty outline per spent shot
   var ammoEl=document.getElementById('ammoVal');
@@ -2657,6 +3037,148 @@ function updateBotAI(b, dt){
   }
 }
 
+// Nearest opposing-team ship this bot can currently detect, within a
+// reasonable engagement radius (bots don't sense the whole map at once).
+function nearestEnemyShip(b){
+  var all=allShips(), best=null, bestD=Infinity;
+  for(var i=0;i<all.length;i++){
+    var e=all[i];
+    if(!e.alive || e===b || !isEnemyOf(b,e)) continue;
+    if(!isDetectableBy(b,e)) continue;
+    var d=dst(b.x,b.y,e.x,e.y);
+    if(d<bestD && d<600){ bestD=d; best=e; }
+  }
+  return best;
+}
+
+// Warp Core mode's bot AI -- a completely separate function from
+// updateBotAI so Battle Arena's AI is never touched. Both allied and enemy
+// bots run this same logic (just with opposite `team`), in priority order:
+// 1) carrying a core -> race it home, taking defensive shots along the way
+// 2) a detectable enemy is near -> skirmish it (same movement/fire math as
+//    updateBotAI's skirmish block, just retargeted via nearestEnemyShip)
+// 3) otherwise -> fetch the nearest detectable, uncarried core this bot's
+//    team still needs
+// 4) nothing to do -> loiter near home base
+function updateBotAI_WarpCore(b, dt){
+  b.aiDecisionTimer -= dt;
+  b.thrusting=false;
+  if(b.aiDecisionTimer<=0){
+    b.aiStrafeDir = Math.random()<0.5?1:-1;
+    b.aiDecisionTimer = 700 + Math.random()*700;
+  }
+
+  var idealRange = b.def.id==='longshot' ? 480 : (b.def.id==='swarmer' ? 150 : (b.def.id==='nebula' ? 170 : 280));
+  var enemy=nearestEnemyShip(b);
+
+  if(b.carryingCores.length>0){
+    b.aiState='return';
+    var homeBase=warpBases.filter(function(bb){ return bb.team===b.team; })[0];
+    var openSlot = homeBase ? homeBase.slots.filter(function(s){ return !s.filled; })[0] : null;
+    var dest = openSlot || teamBase(b.team);
+    var homeAngle=angTo(b.x,b.y,dest.x,dest.y);
+    var da=angDiff(b.angle, homeAngle);
+    b.angle += da*0.10;
+    b.vx += Math.cos(b.angle)*0.15; b.vy += Math.sin(b.angle)*0.15;
+    b.thrusting=true;
+    b.vx *= b.def.drag; b.vy *= b.def.drag;
+    var sp=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
+    var maxSp=b.def.maxSpeed*0.85*(b.anchoredTimer>0?0.5:1);
+    if(sp>maxSp){ b.vx=b.vx/sp*maxSp; b.vy=b.vy/sp*maxSp; }
+
+    b.cooldown -= dt;
+    if(!b.def.beamWeapon && enemy && b.cooldown<=0 && dst(b.x,b.y,enemy.x,enemy.y)<220 && b.ammo>0){
+      var fireAngle=angTo(b.x,b.y,enemy.x,enemy.y);
+      if(b.def.coneWeapon){ spawnGasCone(b, fireAngle); b.cooldown=b.def.coneFireRate*1.8; }
+      else { beginFire(b, fireAngle); b.cooldown=b.def.fireRate*1.8; }
+      b.ammo--; b.idleTimer=0;
+    }
+    return;
+  }
+
+  if(enemy){
+    b.aiState='engage';
+    var d=dst(b.x,b.y,enemy.x,enemy.y);
+    var angleToTarget=angTo(b.x,b.y,enemy.x,enemy.y);
+    var moveAngle=angleToTarget;
+    if(d < idealRange-40) moveAngle = angleToTarget+Math.PI;
+    else if(d <= idealRange+40) moveAngle = angleToTarget + (Math.PI/2)*b.aiStrafeDir;
+
+    var da2=angDiff(b.angle, angleToTarget);
+    b.angle += da2*0.12;
+
+    var thrustAngleDiff=Math.abs(angDiff(b.angle, moveAngle));
+    if(thrustAngleDiff < Math.PI/2){
+      b.vx += Math.cos(b.angle)*0.14; b.vy += Math.sin(b.angle)*0.14;
+      b.thrusting=true;
+    }
+    b.vx *= b.def.drag; b.vy *= b.def.drag;
+    var sp2=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
+    var maxSp2=b.def.maxSpeed*0.8*(b.anchoredTimer>0?0.5:1);
+    if(sp2>maxSp2){ b.vx=b.vx/sp2*maxSp2; b.vy=b.vy/sp2*maxSp2; }
+
+    b.cooldown -= dt;
+    if(b.def.beamWeapon){
+      if(b.beamActive<=0 && b.ammo>=MAX_AMMO && d < idealRange+130){
+        b.ammo=0; b.beamActive=b.def.beamDuration||2000; b.beamAngle=angleToTarget; b.beamTickTimer=0; b.idleTimer=0;
+      }
+    } else if(b.def.coneWeapon){
+      if(b.cooldown<=0 && d < idealRange+130 && b.ammo>0){
+        spawnGasCone(b, angleToTarget); b.ammo--; b.cooldown=b.def.coneFireRate; b.idleTimer=0;
+      }
+    } else if(b.cooldown<=0 && d < idealRange+130 && b.ammo>0){
+      var spread=(Math.random()-0.5)*(b.def.spread||0.1)*2;
+      var shots=b.def.bulletsPerShot||1;
+      for(var s=0;s<shots;s++){
+        var off = shots>1 ? (s-(shots-1)/2)*0.18 : 0;
+        beginFire(b, angleToTarget+spread+off);
+      }
+      b.ammo--; b.cooldown=b.def.fireRate*1.5; b.idleTimer=0;
+    }
+
+    if(b.abilityCharge>0 && Math.random()<0.006 && d<420){
+      triggerAbilityFor(b);
+    }
+    return;
+  }
+
+  var core=findNearestFetchableCore(b);
+  if(core){
+    b.aiState='fetch';
+    var coreAngle=angTo(b.x,b.y,core.x,core.y);
+    var da3=angDiff(b.angle, coreAngle);
+    b.angle += da3*0.10;
+    b.vx += Math.cos(b.angle)*0.15; b.vy += Math.sin(b.angle)*0.15;
+    b.thrusting=true;
+    b.vx *= b.def.drag; b.vy *= b.def.drag;
+    var sp3=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
+    var maxSp3=b.def.maxSpeed*0.8*(b.anchoredTimer>0?0.5:1);
+    if(sp3>maxSp3){ b.vx=b.vx/sp3*maxSp3; b.vy=b.vy/sp3*maxSp3; }
+    return;
+  }
+
+  // Nothing to fetch/fight right now -- sitting at home would mean never
+  // finding anything, since a hidden core only reveals itself once
+  // something gets close. Patrol toward a rotating point somewhere in
+  // enemy territory instead, so bots actively sweep the map for cores.
+  b.aiState='scout';
+  b.scoutTimer = (b.scoutTimer||0) - dt;
+  if(!b.scoutTarget || b.scoutTimer<=0 || dst(b.x,b.y,b.scoutTarget.x,b.scoutTarget.y)<150){
+    var enemyBase=teamBase(otherTeam(b.team));
+    b.scoutTarget={ x:clamp(enemyBase.x+rnd(-500,500),150,WW-150), y:clamp(enemyBase.y+rnd(-500,500),150,WH-150) };
+    b.scoutTimer=8000+Math.random()*4000;
+  }
+  var scoutAngle=angTo(b.x,b.y,b.scoutTarget.x,b.scoutTarget.y);
+  var da4=angDiff(b.angle,scoutAngle);
+  b.angle += da4*0.08;
+  b.vx += Math.cos(b.angle)*0.12; b.vy += Math.sin(b.angle)*0.12;
+  b.thrusting=true;
+  b.vx *= b.def.drag; b.vy *= b.def.drag;
+  var sp4=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
+  var maxSp4=b.def.maxSpeed*0.7*(b.anchoredTimer>0?0.5:1);
+  if(sp4>maxSp4){ b.vx=b.vx/sp4*maxSp4; b.vy=b.vy/sp4*maxSp4; }
+}
+
 /* =====================================================================
    PLAYER UPDATE (rotate + thrust control scheme)
 ===================================================================== */
@@ -2787,7 +3309,7 @@ function nearestHomingTarget(bl){
   var all=allShips(), best=null, bestD=Infinity;
   for(var i=0;i<all.length;i++){
     var e=all[i];
-    if(!e.alive || e===bl.owner) continue;
+    if(!e.alive || e===bl.owner || !isEnemyOf(bl.owner,e)) continue;
     var d=dst(bl.x,bl.y,e.x,e.y);
     if(d<bestD && d<=(bl.homingRange||500)){ bestD=d; best=e; }
   }
@@ -2819,9 +3341,9 @@ function updateBullets(dt){
 
     if(!removed){
       var targets=[];
-      if(player.alive && player!==bl.owner) targets.push(player);
-      if(remotePlayer && remotePlayer.alive && remotePlayer!==bl.owner) targets.push(remotePlayer);
-      for(var t=0;t<bots.length;t++){ if(bots[t].alive && bots[t]!==bl.owner) targets.push(bots[t]); }
+      if(player.alive && player!==bl.owner && isEnemyOf(bl.owner,player)) targets.push(player);
+      if(remotePlayer && remotePlayer.alive && remotePlayer!==bl.owner && isEnemyOf(bl.owner,remotePlayer)) targets.push(remotePlayer);
+      for(var t=0;t<bots.length;t++){ if(bots[t].alive && bots[t]!==bl.owner && isEnemyOf(bl.owner,bots[t])) targets.push(bots[t]); }
 
       for(var ti=0;ti<targets.length;ti++){
         var tgt=targets[ti];
@@ -2866,6 +3388,7 @@ function updateBullets(dt){
             tgt.alive=false;
             spawnBurst(tgt.x,tgt.y,tgt.def.color,28);
             sfxShipExplosion();
+            dropCarriedCores(tgt);
             if(!tgt.isPlayer && (bl.owner===player || bl.owner===remotePlayer)){
               killCount++;
               spawnGem(tgt.x, tgt.y);
@@ -3016,7 +3539,11 @@ function update(dt){
     updateBeamWeapon(remotePlayer, dt);
   }
   updateNebulaStatus(dt);
-  for(var i=0;i<bots.length;i++){ if(bots[i].alive) updateBotAI(bots[i],dt); }
+  if(gameMode==='warpcore'){
+    for(var i=0;i<bots.length;i++){ if(bots[i].alive) updateBotAI_WarpCore(bots[i],dt); }
+  } else {
+    for(var i=0;i<bots.length;i++){ if(bots[i].alive) updateBotAI(bots[i],dt); }
+  }
   for(var i=0;i<bots.length;i++){
     var b=bots[i];
     if(!b.alive){
@@ -3045,6 +3572,7 @@ function update(dt){
   updateTurrets(dt);
   updateGasClouds(dt);
   updateGems(dt);
+  if(gameMode==='warpcore') updateWarpCores(dt);
   updateShieldStation(dt);
   updateTractorPull(dt);
   updateIdleRegen(dt);
@@ -3052,11 +3580,17 @@ function update(dt){
   updateCamera(dt);
   updateHUD();
 
-  var botsAlive=0;
-  for(var i=0;i<bots.length;i++) if(bots[i].alive) botsAlive++;
-  if(!player.alive){ endGame(false); }
-  else if(botsAlive===0){ endGame(true,'cleared'); }
-  else if(gemsCollectedThisMatch>=GEMS_TO_WIN){ endGame(true,'gems'); }
+  if(gameMode==='warpcore'){
+    if(!player.alive){ endGame(false,'warpcoreDied'); }
+    else if(warpBaseFilledCount('A')>=3){ endGame(true,'warpcoreWon'); }
+    else if(warpBaseFilledCount('B')>=3){ endGame(false,'warpcoreLost'); }
+  } else {
+    var botsAlive=0;
+    for(var i=0;i<bots.length;i++) if(bots[i].alive) botsAlive++;
+    if(!player.alive){ endGame(false); }
+    else if(botsAlive===0){ endGame(true,'cleared'); }
+    else if(gemsCollectedThisMatch>=GEMS_TO_WIN){ endGame(true,'gems'); }
+  }
 
   if(netRole==='host') hostNetworkTick(dt);
 }
@@ -3244,6 +3778,11 @@ function drawWorld(){
   drawShieldStation();
   for(var i=0;i<nebulaClouds.length;i++) drawNebulaCloud(nebulaClouds[i]);
   for(var i=0;i<gasClouds.length;i++) drawGasCloud(gasClouds[i]);
+  for(var i=0;i<warpBases.length;i++) drawWarpBase(warpBases[i]);
+  for(var i=0;i<warpCores.length;i++){
+    var wc=warpCores[i];
+    if(!wc.delivered && !wc.carriedBy && isCoreVisibleToViewer(wc)) drawWarpCore(wc);
+  }
 
   for(var i=0;i<gems.length;i++) drawGem(gems[i]);
   for(var i=0;i<turrets.length;i++){ if(turrets[i].alive) drawTurret(turrets[i]); }
@@ -3336,6 +3875,54 @@ function drawGasCloud(c){
   ctx.stroke();
   ctx.restore();
 }
+// Warp Core mode: a team's base zone plus its 3 delivery slots (lit solid
+// when filled, dark outline when empty) -- reuses the shield station's
+// layered glow/dashed-ring look, color-coded per team.
+function drawWarpBase(base){
+  var col = base.team==='A' ? '#00d4ff' : '#ff4444';
+  ctx.save();
+  ctx.translate(base.x,base.y);
+  try{
+    var g=ctx.createRadialGradient(0,0,0,0,0,90);
+    g.addColorStop(0, base.team==='A' ? 'rgba(0,180,255,0.18)' : 'rgba(255,60,60,0.18)');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.beginPath(); ctx.arc(0,0,90,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
+  }catch(e){}
+  ctx.strokeStyle=col; ctx.lineWidth=2; ctx.setLineDash([10,8]);
+  ctx.beginPath(); ctx.arc(0,0,70,0,Math.PI*2); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  for(var i=0;i<base.slots.length;i++){
+    var s=base.slots[i];
+    ctx.save();
+    ctx.translate(s.x,s.y);
+    ctx.shadowColor=col; ctx.shadowBlur = s.filled ? 14 : 4;
+    ctx.strokeStyle=col;
+    ctx.fillStyle = s.filled ? col : 'rgba(0,10,20,0.85)';
+    ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(0,0,10,0,Math.PI*2); ctx.fill(); ctx.stroke();
+    ctx.restore();
+  }
+}
+// A hidden warp core -- only drawn where isCoreVisibleToViewer allows it.
+function drawWarpCore(core){
+  var col = core.team==='A' ? '#00d4ff' : '#ff4444';
+  var pulse=0.75+0.25*Math.sin(performance.now()*0.006);
+  ctx.save();
+  ctx.translate(core.x,core.y);
+  ctx.shadowColor=col; ctx.shadowBlur=16*pulse;
+  ctx.fillStyle=col;
+  ctx.beginPath();
+  for(var i=0;i<6;i++){
+    var a=(i/6)*Math.PI*2;
+    var r=9*pulse;
+    if(i===0) ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r);
+    else ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
 function drawBeam(e){
   var range = e.beamRangeNow || e.def.beamRange;
   var ex=e.x+Math.cos(e.beamAngle)*range, ey=e.y+Math.sin(e.beamAngle)*range;
@@ -3375,6 +3962,18 @@ function drawMinimap(){
     var trt=turrets[i]; if(!trt.alive) continue;
     mx.fillStyle=trt.color;
     mx.beginPath(); mx.arc(trt.x*scaleX,trt.y*scaleY,1.5,0,Math.PI*2); mx.fill();
+  }
+  for(var i=0;i<warpBases.length;i++){
+    var wb=warpBases[i];
+    mx.strokeStyle = wb.team==='A' ? 'rgba(0,212,255,0.8)' : 'rgba(255,68,68,0.8)';
+    mx.lineWidth=1.5;
+    mx.beginPath(); mx.arc(wb.x*scaleX,wb.y*scaleY,5,0,Math.PI*2); mx.stroke();
+  }
+  for(var i=0;i<warpCores.length;i++){
+    var wc=warpCores[i];
+    if(wc.delivered || !isCoreVisibleToViewer(wc)) continue;
+    mx.fillStyle = wc.team==='A' ? 'rgba(0,212,255,0.9)' : 'rgba(255,68,68,0.9)';
+    mx.beginPath(); mx.arc(wc.x*scaleX,wc.y*scaleY,2,0,Math.PI*2); mx.fill();
   }
   for(var i=0;i<bots.length;i++){
     var b=bots[i]; if(!b.alive || !isVisibleToViewer(b)) continue;
