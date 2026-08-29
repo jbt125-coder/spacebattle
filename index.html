@@ -1280,11 +1280,13 @@ document.getElementById('ytPlay').addEventListener('click',function(){
     f.vx=0; f.vy=0; f.angle = sign<0 ? 0 : Math.PI;
     f.hp=40; f.maxHp=40; f.color=def.color; f.shipId=def.id;
     f.cooldown=rndI(30,90); f.respawnTimer=0; f.flick=Math.random()*100;
+    f.strafeDir = Math.random()<0.5?1:-1; f.decisionTimer=rndI(40,100);
   }
   var dummyA={}, dummyB={};
   resetDummyFighter(dummyA,-1);
   resetDummyFighter(dummyB,1);
   var dummyBullets=[], dummyParticles=[];
+  window.__titleDummyFighters=[dummyA,dummyB]; // read-only hook for automated tests
 
   function stepDummyBattle(w,h){
     var fighters=[dummyA,dummyB];
@@ -1298,11 +1300,28 @@ document.getElementById('ytPlay').addEventListener('click',function(){
       var o=fighters[1-i];
       var ax=f.fx*w, ay=f.fy*h, ox=o.fx*w, oy=o.fy*h;
       var toOther=angTo(ax,ay,ox,oy);
+      var awayFromOther=angTo(ox,oy,ax,ay);
       var d=dst(ax,ay,ox,oy);
-      var ideal=Math.min(w,h)*0.22;
-      var moveAngle=toOther;
-      if(d<ideal-20) moveAngle=toOther+Math.PI;
-      else if(d<=ideal+20) moveAngle=toOther+(Math.PI/2)*(i===0?1:-1);
+
+      // Re-roll which way this fighter strafes every couple of seconds,
+      // exactly like the real bot AI's aiStrafeDir/aiDecisionTimer -- a
+      // fixed per-fighter direction would bias both ships to always drift
+      // the same way (e.g. straight down) instead of genuinely maneuvering.
+      f.decisionTimer--;
+      if(f.decisionTimer<=0){ f.strafeDir = Math.random()<0.5?1:-1; f.decisionTimer=rndI(40,100); }
+
+      var hpFrac=f.hp/f.maxHp;
+      var moveAngle;
+      if(hpFrac<0.35){
+        // Hurt -- peel off and put some distance between them instead of
+        // trading shots at close range (still faces the threat to fire back).
+        moveAngle=awayFromOther;
+      } else {
+        var ideal=Math.min(w,h)*0.22;
+        if(d<ideal-20) moveAngle=awayFromOther;
+        else if(d>ideal+20) moveAngle=toOther;
+        else moveAngle=toOther+(Math.PI/2)*f.strafeDir;
+      }
       f.angle += angDiff(f.angle,toOther)*0.08;
       f.vx += Math.cos(moveAngle)*0.06; f.vy += Math.sin(moveAngle)*0.06;
       f.vx*=0.94; f.vy*=0.94;
@@ -1367,7 +1386,7 @@ document.getElementById('ytPlay').addEventListener('click',function(){
       var f=fighters[i];
       if(f.hp<=0) continue;
       var fxp=f.fx*w, fyp=f.fy*h;
-      drawShipGlyph(tx, fxp, fyp, 0.85, f.color, f.flick, f.shipId);
+      drawShipGlyph(tx, fxp, fyp, 0.85, f.color, f.flick, f.shipId, f.angle);
       var barW=26, bx=fxp-barW/2, by=fyp+16;
       tx.fillStyle='rgba(0,0,0,0.4)'; tx.fillRect(bx,by,barW,3);
       tx.fillStyle=f.color; tx.fillRect(bx,by,barW*Math.max(0,f.hp/f.maxHp),3);
@@ -1483,11 +1502,11 @@ document.getElementById('skipAudioBtn').addEventListener('click',function(){
 ===================================================================== */
 var selectedShip=SHIPS[0];
 
-function drawShipGlyph(gctx, cx, cy, scale, color, t, shipId){
+function drawShipGlyph(gctx, cx, cy, scale, color, t, shipId, angle){
   gctx.save();
   gctx.translate(cx,cy);
   gctx.scale(scale,scale);
-  gctx.rotate(-Math.PI/2);
+  gctx.rotate(angle===undefined ? -Math.PI/2 : angle);
   gctx.shadowColor=color; gctx.shadowBlur=12;
   gctx.strokeStyle=color;
   gctx.fillStyle='rgba(255,255,255,0.05)';
