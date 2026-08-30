@@ -257,6 +257,10 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
     <div class="hud-val" id="remainVal" style="font-size:14px;">6</div>
     <div class="hud-lbl" id="coresLbl" style="margin-top:6px;display:none;">CORES -- YOU / ENEMY</div>
     <div class="hud-val" id="coresVal" style="font-size:14px;color:#00d4ff;text-shadow:0 0 10px rgba(0,212,255,0.6);display:none;">0/3 -- 0/3</div>
+    <div class="hud-lbl" id="beltPctLbl" style="margin-top:6px;display:none;">TERRITORY -- YOU / ENEMY</div>
+    <div class="hud-val" id="beltPctVal" style="font-size:14px;color:#00d4ff;text-shadow:0 0 10px rgba(0,212,255,0.6);display:none;">0% -- 0%</div>
+    <div class="hud-lbl" id="beltTimeLbl" style="margin-top:6px;display:none;">TIME</div>
+    <div class="hud-val" id="beltTimeVal" style="font-size:14px;display:none;">2:00</div>
   </div>
 </div>
 
@@ -350,6 +354,7 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
   <div id="modeToggleRow">
     <button class="modeToggleBtn active" id="modeArenaBtn">BATTLE ARENA</button>
     <button class="modeToggleBtn" id="modeWarpBtn">WARP CORE</button>
+    <button class="modeToggleBtn" id="modeBeltBtn">BELT BLAST</button>
   </div>
   <div id="gemBankRow"><span class="gicon">&#9670;</span>HANGAR CHEST: <span id="gemBankVal">0</span> GEMS</div>
   <div id="bucksBankRow"><span class="gicon">$</span>GALACTIC BUCKS: <span id="bucksBankVal">0</span></div>
@@ -768,6 +773,23 @@ function resolveObstacles(ent){
   ent.y=clamp(ent.y, ent.r, WH-ent.r);
 }
 
+// Belt Blast: circle-circle push-apart against every live asteroid,
+// generalizing resolveObstacles' penetration-depth math. Asteroids are
+// treated as effectively immovable for the push (like the static wall
+// obstacles) -- only the ship is displaced. No hp change on contact.
+function resolveAsteroids(ent){
+  for(var i=0;i<asteroids.length;i++){
+    var a=asteroids[i];
+    var dx=ent.x-a.x, dy=ent.y-a.y;
+    var d=Math.sqrt(dx*dx+dy*dy) || 0.01;
+    var push=(ent.r+a.r)-d;
+    if(push>0){
+      ent.x += (dx/d)*push;
+      ent.y += (dy/d)*push;
+    }
+  }
+}
+
 /* =====================================================================
    SHIELD GENERATOR STATION
    One fixed station per match at a random valid location. Any ship
@@ -970,6 +992,87 @@ function teamSpawnPoint(team){
   return {x:clamp(base.x+rnd(-150,150), 100, WW-100), y:clamp(base.y+rnd(-150,150), 100, WH-100)};
 }
 
+/* =====================================================================
+   BELT BLAST -- asteroid field. Each asteroid is a free-floating circle
+   (no obstacle interaction of its own) that drifts slowly and wraps
+   around the map edges instead of bouncing. Shooting one instantly
+   claims/recolors it to the shooter's team; large/medium sizes fragment
+   into two smaller same-colored pieces, and destroying the smallest size
+   removes it and (below the population cap) spawns a fresh large,
+   neutral asteroid somewhere far from the ships.
+===================================================================== */
+var asteroids=[]; // [{x,y,vx,vy,size:'large'|'medium'|'small',r,color:'neutral'|'A'|'B'}, ...]
+var BELT_ASTEROID_START_COUNT=12;
+var BELT_ASTEROID_CAP=48;
+var BELT_SIZE_R={large:34, medium:22, small:13};
+var BELT_BLAST_MATCH_MS=120000;
+var beltBlastTimeLeft=0;
+
+function makeAsteroid(x,y,size,color){
+  var a=rnd(0,Math.PI*2), spd=rnd(0.3,0.9);
+  var jag=[];
+  for(var j=0;j<9;j++) jag.push(rnd(0.78,1.15));
+  return {x:x, y:y, vx:Math.cos(a)*spd, vy:Math.sin(a)*spd, size:size, r:BELT_SIZE_R[size], color:color, jag:jag, spin:rnd(-0.0006,0.0006), spinBase:rnd(0,Math.PI*2)};
+}
+
+function placeAsteroids(){
+  asteroids=[];
+  for(var i=0;i<BELT_ASTEROID_START_COUNT;i++){
+    var x,y,ok,tries=0;
+    do{
+      x=rnd(150, WW-150); y=rnd(150, WH-150);
+      ok = dst(x,y, WW/2, WH/2) > 200;
+      if(ok){
+        for(var o=0;o<obstacles.length;o++){
+          if(circleRectHit(x,y,BELT_SIZE_R.large+20,obstacles[o])){ ok=false; break; }
+        }
+      }
+      if(ok){
+        for(var j=0;j<asteroids.length;j++){
+          if(dst(x,y,asteroids[j].x,asteroids[j].y) < BELT_SIZE_R.large*2+30){ ok=false; break; }
+        }
+      }
+      tries++;
+    } while(!ok && tries<40);
+    asteroids.push(makeAsteroid(x,y,'large','neutral'));
+  }
+}
+
+// Picks the best of a handful of random candidate points -- the one
+// farthest (max of the min-distance-to-any-alive-ship) -- for a fresh
+// large asteroid spawned after a small one is destroyed.
+function spawnAsteroidFarFromShips(size,color){
+  var all=allShips().filter(function(e){ return e.alive; });
+  var best=null, bestScore=-1;
+  for(var i=0;i<8;i++){
+    var x=rnd(120, WW-120), y=rnd(120, WH-120);
+    var minD=Infinity;
+    for(var j=0;j<all.length;j++){
+      var d=dst(x,y,all[j].x,all[j].y);
+      if(d<minD) minD=d;
+    }
+    if(minD>bestScore){ bestScore=minD; best={x:x,y:y}; }
+  }
+  if(!best) best={x:rnd(120,WW-120), y:rnd(120,WH-120)};
+  return makeAsteroid(best.x, best.y, size, color);
+}
+
+function updateAsteroids(dt){
+  for(var i=0;i<asteroids.length;i++){
+    var a=asteroids[i];
+    a.x += a.vx*(dt/16.67); a.y += a.vy*(dt/16.67);
+    if(a.x < -a.r) a.x = WW+a.r; else if(a.x > WW+a.r) a.x = -a.r;
+    if(a.y < -a.r) a.y = WH+a.r; else if(a.y > WH+a.r) a.y = -a.r;
+  }
+}
+
+function beltBlastPct(team){
+  if(asteroids.length===0) return 0;
+  var n=0;
+  for(var i=0;i<asteroids.length;i++) if(asteroids[i].color===team) n++;
+  return n/asteroids.length;
+}
+
 // A core is "hidden" exactly like a concealed ship -- undetectable beyond
 // WARP_CORE_DETECT_RANGE unless it's being carried, in which case it's
 // just wherever its carrier is, subject to the carrier's own normal
@@ -1074,6 +1177,28 @@ function applyDamage(tgt, amount){
   }
   tgt.hp -= amount;
 }
+// Belt Blast: any weapon hit instantly claims/breaks an asteroid, no hit
+// points involved. Large/medium fragment into two smaller pieces colored
+// the shooter's team (even re-hitting your own asteroid just re-breaks it
+// into your own color again); the smallest size is destroyed outright and
+// -- below the population cap -- replaced by a fresh large neutral
+// asteroid spawned far from the ships.
+function breakAsteroid(ast, shooterTeam){
+  var idx=asteroids.indexOf(ast);
+  if(idx===-1) return;
+  var wasAtCap = asteroids.length >= BELT_ASTEROID_CAP; // checked BEFORE the splice below shrinks the array
+  asteroids.splice(idx,1);
+  spawnBurst(ast.x, ast.y, shooterTeam==='A'?'#00d4ff':'#ff4444', 10);
+  if(ast.size==='large'){
+    asteroids.push(makeAsteroid(ast.x+rnd(-8,8), ast.y+rnd(-8,8), 'medium', shooterTeam));
+    asteroids.push(makeAsteroid(ast.x+rnd(-8,8), ast.y+rnd(-8,8), 'medium', shooterTeam));
+  } else if(ast.size==='medium'){
+    asteroids.push(makeAsteroid(ast.x+rnd(-6,6), ast.y+rnd(-6,6), 'small', shooterTeam));
+    asteroids.push(makeAsteroid(ast.x+rnd(-6,6), ast.y+rnd(-6,6), 'small', shooterTeam));
+  } else if(!wasAtCap){
+    asteroids.push(spawnAsteroidFarFromShips('large','neutral'));
+  }
+}
 // Weekly Challenge progress -- called from every kill-detection site
 // (bullets/beam/gas clouds) right after a target is confirmed dead.
 // Solo-only (matches Space Station upgrades' own scoping): only the local
@@ -1174,6 +1299,25 @@ function updateGasClouds(dt){
     // Anyone no longer inside loses their exposure entry -- their ramp
     // resets back to base if they re-enter later (or a different cloud).
     c.exposures=c.exposures.filter(function(ex){ return stillInside.indexOf(ex.ent)>=0; });
+
+    // Belt Blast: the same cone instantly claims/breaks any asteroid it
+    // touches on a damage tick -- snapshot the live objects (not just a
+    // length) so a fragment spawned by a break this tick isn't re-tested
+    // this same tick, and a population-cap small-destroy (which can
+    // shrink the array) never leaves a stale index past the new end.
+    if(doTick && gameMode==='beltblast' && c.owner && c.owner.team){
+      var astSnapshot3=asteroids.slice();
+      for(var ak=0;ak<astSnapshot3.length;ak++){
+        var ast3=astSnapshot3[ak];
+        if(asteroids.indexOf(ast3)===-1) continue;
+        var dA=dst(c.x,c.y,ast3.x,ast3.y);
+        if(dA>c.range) continue;
+        var angA=angTo(c.x,c.y,ast3.x,ast3.y);
+        if(Math.abs(angDiff(c.angle,angA))>c.coneAngle/2) continue;
+        breakAsteroid(ast3, c.owner.team);
+        sfxHit();
+      }
+    }
   }
 }
 
@@ -2365,17 +2509,19 @@ function showSelectScreen(){
   // mode toggle and always play Battle Arena.
   document.getElementById('modeToggleRow').style.display = netRole ? 'none' : 'flex';
   if(netRole) setGameMode('arena');
-  document.getElementById('inviteFriendBtn').style.display = (netRole==='guest' || gameMode==='warpcore') ? 'none' : 'inline-block';
+  document.getElementById('inviteFriendBtn').style.display = (netRole==='guest' || gameMode==='warpcore' || gameMode==='beltblast') ? 'none' : 'inline-block';
   updateDetail();
 }
 function setGameMode(mode){
   gameMode=mode;
   document.getElementById('modeArenaBtn').classList.toggle('active', mode==='arena');
   document.getElementById('modeWarpBtn').classList.toggle('active', mode==='warpcore');
-  document.getElementById('inviteFriendBtn').style.display = (netRole==='guest' || mode==='warpcore') ? 'none' : 'inline-block';
+  document.getElementById('modeBeltBtn').classList.toggle('active', mode==='beltblast');
+  document.getElementById('inviteFriendBtn').style.display = (netRole==='guest' || mode==='warpcore' || mode==='beltblast') ? 'none' : 'inline-block';
 }
 document.getElementById('modeArenaBtn').addEventListener('click',function(){ setGameMode('arena'); });
 document.getElementById('modeWarpBtn').addEventListener('click',function(){ setGameMode('warpcore'); });
+document.getElementById('modeBeltBtn').addEventListener('click',function(){ setGameMode('beltblast'); });
 // Pre-battle instructions -- explains the goal/rewards for whichever mode
 // is currently selected, gated behind progress.showInstructions so it can
 // be permanently dismissed (the "don't show again" toggle here, or the
@@ -2390,6 +2536,14 @@ function getInstructionsContent(mode){
       title: 'WARP CORE',
       goal: 'A 3v3 team battle. Track down all 3 of your team\'s warp cores, hidden across the map, and deliver them to your base before the enemy team delivers theirs.',
       rewards: 'Win a Warp Core match and your team earns $'+GALACTIC_BUCKS_PER_WIN+' Galactic Bucks -- a currency separate from your gem chest.',
+      rewardsUse: 'Spend Galactic Bucks ($'+SPACE_STATION_UPGRADE_COST+' each) at the Space Station in the hangar on powerful one-battle upgrades for your next match: Destructo Missile, Extra Perma-Shield, Cloak, or a Deputy Drone.'
+    };
+  }
+  if(mode==='beltblast'){
+    return {
+      title: 'BELT BLAST',
+      goal: 'A 3v3 team battle over a field of asteroids. Shoot one to claim it in your team\'s color -- large and medium asteroids split into two smaller matching pieces, and destroying the smallest size makes a fresh asteroid appear elsewhere. Ship combat is fully allowed. Whichever team holds the higher percentage of ALL asteroids on the board when the 2-minute clock runs out wins.',
+      rewards: 'Win a Belt Blast match and your team earns $'+GALACTIC_BUCKS_PER_WIN+' Galactic Bucks -- a currency separate from your gem chest.',
       rewardsUse: 'Spend Galactic Bucks ($'+SPACE_STATION_UPGRADE_COST+' each) at the Space Station in the hangar on powerful one-battle upgrades for your next match: Destructo Missile, Extra Perma-Shield, Cloak, or a Deputy Drone.'
     };
   }
@@ -2439,6 +2593,7 @@ document.getElementById('launchBtn').addEventListener('click',function(){
     }
     document.getElementById('selectScreen').style.display='none';
     if(gameMode==='warpcore') startWarpCoreGame();
+    else if(gameMode==='beltblast') startBeltBlastGame();
     else startGame();
   }
   // window.__skipInstructionsModal: read-only-by-convention hook for
@@ -2484,12 +2639,12 @@ var player, bots=[], bullets=[], particles=[], gems=[];
 var turrets=[]; // Seraph deputy turrets -- see spawnTurret/updateTurrets
 var killCount=0, gameActive=false, alertTimer=0, lastTime=0;
 var TOTAL_BOTS=6;
-var gameMode='arena'; // 'arena' (default Battle Arena) | 'warpcore'
+var gameMode='arena'; // 'arena' (default Battle Arena) | 'warpcore' | 'beltblast'
 // Whether `a` and `b` are opposing sides right now. A no-op (always true,
-// preserving the existing free-for-all behavior) outside Warp Core mode --
-// every targeting/friendly-fire check in the game adds this as an EXTRA
+// preserving the existing free-for-all behavior) in Battle Arena -- every
+// targeting/friendly-fire check in the game adds this as an EXTRA
 // condition, never a replacement, so Battle Arena mode is unaffected.
-function isEnemyOf(a,b){ return gameMode!=='warpcore' || a.team!==b.team; }
+function isEnemyOf(a,b){ return gameMode==='arena' || a.team!==b.team; }
 
 // Host-only: the connected guest's ship, simulated alongside `player` and
 // `bots` but never touched by updateBotAI. Null when playing solo or on
@@ -2558,7 +2713,7 @@ function makeRemoteShipEntity(def,x,y,levels){
 // Occasionally re-rolls its ship type so the roster stays varied.
 function respawnBot(b){
   var newDef = Math.random()<0.4 ? SHIPS[rndI(0,SHIPS.length-1)] : b.def;
-  var sp = (gameMode==='warpcore' && b.team) ? teamSpawnPoint(b.team) : randomSpawnPoint();
+  var sp = ((gameMode==='warpcore'||gameMode==='beltblast') && b.team) ? teamSpawnPoint(b.team) : randomSpawnPoint();
   b.def=newDef;
   b.x=sp.x; b.y=sp.y;
   b.vx=0; b.vy=0; b.angle=rnd(0,Math.PI*2);
@@ -2706,6 +2861,22 @@ function updateBeamWeapon(ent, dt){
       if(!tgt.isPlayer) tgt.respawnTimer = rnd(3000,5000);
     }
   }
+
+  // Belt Blast: the beam claims/breaks any asteroid its channel touches,
+  // same instant-break rule as a bullet. Snapshot the live objects (not
+  // just a length) so a fragment spawned by a break this tick isn't
+  // re-tested this same tick, and a population-cap small-destroy (which
+  // can shrink the array) never leaves a stale index past the new end.
+  if(gameMode==='beltblast' && ent.team){
+    var astSnapshot2=asteroids.slice();
+    for(var aj=0;aj<astSnapshot2.length;aj++){
+      var ast2=astSnapshot2[aj];
+      if(asteroids.indexOf(ast2)===-1) continue;
+      if(distPointToSegment(ast2.x,ast2.y, ent.x,ent.y, ex,ey) > ast2.r+6) continue;
+      breakAsteroid(ast2, ent.team);
+      sfxHit();
+    }
+  }
 }
 function spawnBurst(x,y,color,n){
   var rgb=hexRGB(color);
@@ -2805,6 +2976,7 @@ function triggerAbilityFor(ent){
       ent.x += Math.cos(ent.angle)*150;
       ent.y += Math.sin(ent.angle)*150;
       resolveObstacles(ent);
+      resolveAsteroids(ent);
       spawnBurst(ent.x,ent.y,ent.def.color,16);
     } else if(ent.def.id==='longshot'){
       fireBullet(ent, ent.angle, true, false, true);
@@ -3258,6 +3430,7 @@ function startGuestMatch(msg){
   killCount=0;
   bullets=[]; particles=[]; gems=[]; bots=[]; turrets=[]; gasClouds=[];
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
+  asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
 
   player=makeShipEntity(selectedShip, WW/2, WH/2, true);
   player.eff=effectiveStatsFromLevels(selectedShip, getShipProgress(selectedShip.id));
@@ -3381,6 +3554,7 @@ function startGame(){
   player.invincible=1500;
   bots=[]; bullets=[]; particles=[]; gems=[]; turrets=[]; gasClouds=[]; killCount=0;
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
+  asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
   gemsCollectedThisMatch=0;
   remotePlayer=null;
   if(!netRole) applyPendingUpgrade(player); // Space Station upgrades are solo-only (after array resets so a spawned Deputy Drone survives)
@@ -3432,6 +3606,7 @@ function startWarpCoreGame(){
   placeWarpBases();
   placeNebulaClouds();
   placeWarpCores();
+  asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
 
   var pSpawn=teamSpawnPoint('A');
   player=makeShipEntity(selectedShip, pSpawn.x, pSpawn.y, true);
@@ -3467,6 +3642,57 @@ function startWarpCoreGame(){
     b2.team='B'; b2.hp *= 0.85; b2.maxHp=b2.hp;
     b2.warpRole = i===0 ? 'hauler' : 'fighter';
     if(b2.warpRole==='hauler') b2.coreDetectRange = WARP_CORE_DETECT_RANGE*1.6;
+    bots.push(b2);
+  }
+
+  document.getElementById('hud').style.display='flex';
+  document.getElementById('minimap').style.display='block';
+  document.getElementById('abilityBtn').style.display='flex';
+  document.getElementById('abilityLbl').style.display='block';
+  document.getElementById('gameOverScreen').classList.add('hidden');
+  positionAbilityUI();
+
+  CAM.x=player.x; CAM.y=player.y; CAM.zoom=0.62; targetZoom=0.62; manualZoom=0.62;
+
+  killCount=0;
+  updateHUD();
+  gameActive=true;
+  lastTime=performance.now();
+}
+
+function startBeltBlastGame(){
+  genObstacles();
+  placeShieldStation();
+  placeNebulaClouds();
+  placeAsteroids();
+  warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
+
+  var pSpawn=teamSpawnPoint('A');
+  player=makeShipEntity(selectedShip, pSpawn.x, pSpawn.y, true);
+  player.team='A';
+  player.angle=angTo(pSpawn.x,pSpawn.y,WW/2,WH/2);
+  player.invincible=1500;
+  bots=[]; bullets=[]; particles=[]; gems=[]; turrets=[]; gasClouds=[]; killCount=0;
+  gemsCollectedThisMatch=0;
+  remotePlayer=null;
+  lastGuestInput={turnLeft:false, turnRight:false, thrustOn:false, fireOn:false};
+  beltBlastTimeLeft=BELT_BLAST_MATCH_MS;
+  if(!netRole) applyPendingUpgrade(player); // Space Station upgrades are solo-only (after array resets so a spawned Deputy Drone survives)
+
+  document.getElementById('shipNameVal').textContent=selectedShip.name;
+  document.getElementById('shipNameVal').style.color=selectedShip.color;
+  document.getElementById('abilityIcon').textContent=selectedShip.ability.icon;
+
+  for(var i=0;i<2;i++){
+    var sp=teamSpawnPoint('A');
+    var b=makeShipEntity(SHIPS[rndI(0,SHIPS.length-1)], sp.x, sp.y, false);
+    b.team='A'; b.hp *= 0.85; b.maxHp=b.hp;
+    bots.push(b);
+  }
+  for(var i=0;i<3;i++){
+    var sp2=teamSpawnPoint('B');
+    var b2=makeShipEntity(SHIPS[rndI(0,SHIPS.length-1)], sp2.x, sp2.y, false);
+    b2.team='B'; b2.hp *= 0.85; b2.maxHp=b2.hp;
     bots.push(b2);
   }
 
@@ -3537,6 +3763,23 @@ function endGame(won, reason, customTitle, customSub){
   } else if(reason==='warpcoreDied'){
     t.textContent='HULL BREACH'; t.style.color='#ff4444';
     s.textContent='You fell before your team could finish the delivery.';
+  } else if(reason==='beltblastWon' || reason==='beltblastLost' || reason==='beltblastDraw'){
+    var myPct=Math.round(beltBlastPct(player.team)*100), enemyPct=Math.round(beltBlastPct(otherTeam(player.team))*100);
+    if(reason==='beltblastWon'){
+      progress.galacticBucks += GALACTIC_BUCKS_PER_WIN;
+      saveProgress();
+      t.textContent='BELT SECURED'; t.style.color='#44ff88';
+      s.textContent='Your team held '+myPct+'% of the belt to the enemy\'s '+enemyPct+'%! +$'+GALACTIC_BUCKS_PER_WIN+' Galactic Bucks';
+    } else if(reason==='beltblastLost'){
+      t.textContent='BELT LOST'; t.style.color='#ff4444';
+      s.textContent='The enemy team held '+enemyPct+'% of the belt to your '+myPct+'%.';
+    } else {
+      t.textContent='STALEMATE'; t.style.color='#66eaff';
+      s.textContent='Both teams held '+myPct+'% of the belt when the clock ran out.';
+    }
+  } else if(reason==='beltblastDied'){
+    t.textContent='HULL BREACH'; t.style.color='#ff4444';
+    s.textContent='You fell before the clock ran out.';
   } else if(won){
     t.textContent='VICTORY'; t.style.color='#44ff88';
     if(gemsCollectedThisMatch>=GEMS_TO_WIN){
@@ -3597,16 +3840,28 @@ function updateHUD(){
   document.getElementById('gemVal').textContent=gemsCollectedThisMatch+'/'+GEMS_TO_WIN;
 
   var isWarpCore = gameMode==='warpcore';
-  document.getElementById('killLbl').style.display = isWarpCore ? 'none' : '';
-  document.getElementById('killVal').style.display = isWarpCore ? 'none' : '';
-  document.getElementById('remainLbl').style.display = isWarpCore ? 'none' : '';
-  document.getElementById('remainVal').style.display = isWarpCore ? 'none' : '';
-  document.getElementById('gemLbl').style.display = isWarpCore ? 'none' : '';
-  document.getElementById('gemVal').style.display = isWarpCore ? 'none' : '';
+  var isBeltBlast = gameMode==='beltblast';
+  document.getElementById('killLbl').style.display = (isWarpCore||isBeltBlast) ? 'none' : '';
+  document.getElementById('killVal').style.display = (isWarpCore||isBeltBlast) ? 'none' : '';
+  document.getElementById('remainLbl').style.display = (isWarpCore||isBeltBlast) ? 'none' : '';
+  document.getElementById('remainVal').style.display = (isWarpCore||isBeltBlast) ? 'none' : '';
+  document.getElementById('gemLbl').style.display = (isWarpCore||isBeltBlast) ? 'none' : '';
+  document.getElementById('gemVal').style.display = (isWarpCore||isBeltBlast) ? 'none' : '';
   document.getElementById('coresLbl').style.display = isWarpCore ? '' : 'none';
   document.getElementById('coresVal').style.display = isWarpCore ? '' : 'none';
   if(isWarpCore){
     document.getElementById('coresVal').textContent = warpBaseFilledCount('A')+'/3 -- '+warpBaseFilledCount('B')+'/3';
+  }
+  document.getElementById('beltPctLbl').style.display = isBeltBlast ? '' : 'none';
+  document.getElementById('beltPctVal').style.display = isBeltBlast ? '' : 'none';
+  document.getElementById('beltTimeLbl').style.display = isBeltBlast ? '' : 'none';
+  document.getElementById('beltTimeVal').style.display = isBeltBlast ? '' : 'none';
+  if(isBeltBlast){
+    var myPctHud=Math.round(beltBlastPct(player.team)*100), enemyPctHud=Math.round(beltBlastPct(otherTeam(player.team))*100);
+    document.getElementById('beltPctVal').textContent = myPctHud+'% -- '+enemyPctHud+'%';
+    var secsLeft=Math.max(0,Math.ceil(beltBlastTimeLeft/1000));
+    var mm=Math.floor(secsLeft/60), ss=secsLeft%60;
+    document.getElementById('beltTimeVal').textContent = mm+':'+(ss<10?'0':'')+ss;
   }
 
   // Ammo pips: filled dot per available shot, empty outline per spent shot
@@ -4010,6 +4265,135 @@ function updateBotAI_WarpCore(b, dt){
   if(sp4>maxSp4){ b.vx=b.vx/sp4*maxSp4; b.vy=b.vy/sp4*maxSp4; }
 }
 
+// The nearest asteroid worth this bot's team shooting -- any color but its
+// own, preferring an enemy-claimed one (denying/flipping enemy territory)
+// over a neutral one when both are available.
+function nearestWorthwhileAsteroid(b){
+  var bestEnemy=null, bestEnemyD=Infinity, bestNeutral=null, bestNeutralD=Infinity;
+  for(var i=0;i<asteroids.length;i++){
+    var a=asteroids[i];
+    if(a.color===b.team) continue;
+    var d=dst(b.x,b.y,a.x,a.y);
+    if(a.color==='neutral'){ if(d<bestNeutralD){ bestNeutralD=d; bestNeutral=a; } }
+    else if(d<bestEnemyD){ bestEnemyD=d; bestEnemy=a; }
+  }
+  return bestEnemy || bestNeutral;
+}
+
+// Belt Blast's bot AI -- a separate function from updateBotAI_WarpCore so
+// neither mode's AI is ever touched by changes to the other. Every bot
+// runs the same priority logic (no hauler/fighter-style role split --
+// unlike a hidden warp core, asteroids are visible and plentiful, so
+// there's no need for a bot dedicated to hunting them down):
+// 1) a detectable enemy is near -> skirmish it (identical movement/fire
+//    math to updateBotAI_WarpCore's engage state, just retargeted)
+// 2) otherwise -> fly to and shoot the nearest worthwhile asteroid
+// 3) nothing to do -> patrol a rotating random point on the map
+function updateBotAI_BeltBlast(b, dt){
+  b.aiDecisionTimer -= dt;
+  b.thrusting=false;
+  if(b.aiDecisionTimer<=0){
+    b.aiStrafeDir = Math.random()<0.5?1:-1;
+    b.aiDecisionTimer = 700 + Math.random()*700;
+  }
+
+  var idealRange = b.def.id==='longshot' ? 480 : (b.def.id==='swarmer' ? 150 : (b.def.id==='nebula' ? 170 : 280));
+  var enemy=nearestEnemyShip(b);
+
+  if(enemy){
+    b.aiState='engage';
+    var d=dst(b.x,b.y,enemy.x,enemy.y);
+    var angleToTarget=angTo(b.x,b.y,enemy.x,enemy.y);
+    var moveAngle=angleToTarget;
+    if(d < idealRange-40) moveAngle = angleToTarget+Math.PI;
+    else if(d <= idealRange+40) moveAngle = angleToTarget + (Math.PI/2)*b.aiStrafeDir;
+
+    var da2=angDiff(b.angle, angleToTarget);
+    b.angle += da2*0.12;
+
+    var thrustAngleDiff=Math.abs(angDiff(b.angle, moveAngle));
+    if(thrustAngleDiff < Math.PI/2){
+      b.vx += Math.cos(b.angle)*0.14; b.vy += Math.sin(b.angle)*0.14;
+      b.thrusting=true;
+    }
+    b.vx *= b.def.drag; b.vy *= b.def.drag;
+    var sp2=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
+    var maxSp2=b.def.maxSpeed*0.8*(b.anchoredTimer>0?0.5:1);
+    if(sp2>maxSp2){ b.vx=b.vx/sp2*maxSp2; b.vy=b.vy/sp2*maxSp2; }
+
+    b.cooldown -= dt;
+    if(b.def.beamWeapon){
+      if(b.beamActive<=0 && b.ammo>=MAX_AMMO && d < idealRange+130){
+        b.ammo=0; b.beamActive=b.def.beamDuration||2000; b.beamAngle=angleToTarget; b.beamTickTimer=0; b.idleTimer=0;
+      }
+    } else if(b.def.coneWeapon){
+      if(b.cooldown<=0 && d < idealRange+130 && b.ammo>0){
+        spawnGasCone(b, angleToTarget); b.ammo--; b.cooldown=b.def.coneFireRate; b.idleTimer=0;
+      }
+    } else if(b.cooldown<=0 && d < idealRange+130 && b.ammo>0){
+      var spread=(Math.random()-0.5)*(b.def.spread||0.1)*2;
+      var shots=b.def.bulletsPerShot||1;
+      for(var s=0;s<shots;s++){
+        var off = shots>1 ? (s-(shots-1)/2)*0.18 : 0;
+        beginFire(b, angleToTarget+spread+off);
+      }
+      b.ammo--; b.cooldown=b.def.fireRate*1.5; b.idleTimer=0;
+    }
+
+    if(b.abilityCharge>0 && Math.random()<0.006 && d<420){
+      triggerAbilityFor(b);
+    }
+    return;
+  }
+
+  var ast=nearestWorthwhileAsteroid(b);
+  if(ast){
+    b.aiState='mine';
+    var dA=dst(b.x,b.y,ast.x,ast.y);
+    var angleToAst=angTo(b.x,b.y,ast.x,ast.y);
+    var daA=angDiff(b.angle, angleToAst);
+    b.angle += daA*0.10;
+    b.vx += Math.cos(b.angle)*0.15; b.vy += Math.sin(b.angle)*0.15;
+    b.thrusting=true;
+    b.vx *= b.def.drag; b.vy *= b.def.drag;
+    var spA=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
+    var maxSpA=b.def.maxSpeed*0.8*(b.anchoredTimer>0?0.5:1);
+    if(spA>maxSpA){ b.vx=b.vx/spA*maxSpA; b.vy=b.vy/spA*maxSpA; }
+
+    b.cooldown -= dt;
+    if(b.def.beamWeapon){
+      if(b.beamActive<=0 && b.ammo>=MAX_AMMO && dA < idealRange+130){
+        b.ammo=0; b.beamActive=b.def.beamDuration||2000; b.beamAngle=angleToAst; b.beamTickTimer=0; b.idleTimer=0;
+      }
+    } else if(b.def.coneWeapon){
+      if(b.cooldown<=0 && dA < idealRange+130 && b.ammo>0){
+        spawnGasCone(b, angleToAst); b.ammo--; b.cooldown=b.def.coneFireRate; b.idleTimer=0;
+      }
+    } else if(b.cooldown<=0 && dA < idealRange+130 && b.ammo>0){
+      beginFire(b, angleToAst);
+      b.ammo--; b.cooldown=b.def.fireRate*1.5; b.idleTimer=0;
+    }
+    return;
+  }
+
+  // Nothing to fight or mine -- patrol a rotating random point on the map.
+  b.aiState='scout';
+  b.scoutTimer = (b.scoutTimer||0) - dt;
+  if(!b.scoutTarget || b.scoutTimer<=0 || dst(b.x,b.y,b.scoutTarget.x,b.scoutTarget.y)<150){
+    b.scoutTarget={ x:rnd(150,WW-150), y:rnd(150,WH-150) };
+    b.scoutTimer=8000+Math.random()*4000;
+  }
+  var scoutAngle=angTo(b.x,b.y,b.scoutTarget.x,b.scoutTarget.y);
+  var da4=angDiff(b.angle,scoutAngle);
+  b.angle += da4*0.08;
+  b.vx += Math.cos(b.angle)*0.12; b.vy += Math.sin(b.angle)*0.12;
+  b.thrusting=true;
+  b.vx *= b.def.drag; b.vy *= b.def.drag;
+  var sp4=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
+  var maxSp4=b.def.maxSpeed*0.7*(b.anchoredTimer>0?0.5:1);
+  if(sp4>maxSp4){ b.vx=b.vx/sp4*maxSp4; b.vy=b.vy/sp4*maxSp4; }
+}
+
 /* =====================================================================
    PLAYER UPDATE (rotate + thrust control scheme)
 ===================================================================== */
@@ -4065,6 +4449,7 @@ function updateControlledShip(ent, input, dt, movementOnly){
   ent.x += ent.vx*(dt/16.67);
   ent.y += ent.vy*(dt/16.67);
   resolveObstacles(ent);
+  resolveAsteroids(ent);
 
   ent.trail.push({x:ent.x,y:ent.y});
   if(ent.trail.length>20) ent.trail.shift();
@@ -4266,6 +4651,27 @@ function updateBullets(dt){
       }
     }
 
+    // Belt Blast: any bullet that touches an asteroid instantly breaks/
+    // claims it -- checked after ships/turrets so ship-vs-ship combat is
+    // completely unaffected. Snapshot the live objects (not just a length)
+    // so a fragment created by a break just now isn't immediately re-tested
+    // by this same bullet, and so a population-cap small-destroy (which
+    // can shrink the array instead of growing it) never leaves a stale
+    // index pointing past the live array's new end.
+    if(!removed && gameMode==='beltblast' && bl.owner && bl.owner.team){
+      var astSnapshot=asteroids.slice();
+      for(var ai=0;ai<astSnapshot.length;ai++){
+        var ast=astSnapshot[ai];
+        if(asteroids.indexOf(ast)===-1) continue;
+        if(dst(bl.x,bl.y,ast.x,ast.y) < ast.r+bl.size){
+          breakAsteroid(ast, bl.owner.team);
+          sfxHit();
+          if(!bl.piercing) removed=true;
+          break;
+        }
+      }
+    }
+
     if(bl.life<=0 || bl.x<0||bl.x>WW||bl.y<0||bl.y>WH) removed=true;
     // A combo-eligible bullet that's being removed without ever landing a
     // hit is a miss -- breaks the streak back to 1x for its next shot.
@@ -4383,6 +4789,8 @@ function update(dt){
   updateNebulaStatus(dt);
   if(gameMode==='warpcore'){
     for(var i=0;i<bots.length;i++){ if(bots[i].alive) updateBotAI_WarpCore(bots[i],dt); }
+  } else if(gameMode==='beltblast'){
+    for(var i=0;i<bots.length;i++){ if(bots[i].alive) updateBotAI_BeltBlast(bots[i],dt); }
   } else {
     for(var i=0;i<bots.length;i++){ if(bots[i].alive) updateBotAI(bots[i],dt); }
   }
@@ -4407,6 +4815,7 @@ function update(dt){
     updateBeamWeapon(b, dt);
     b.x += b.vx*(dt/16.67); b.y += b.vy*(dt/16.67);
     resolveObstacles(b);
+    resolveAsteroids(b);
     b.trail.push({x:b.x,y:b.y});
     if(b.trail.length>16) b.trail.shift();
   }
@@ -4415,6 +4824,7 @@ function update(dt){
   updateGasClouds(dt);
   updateGems(dt);
   if(gameMode==='warpcore') updateWarpCores(dt);
+  if(gameMode==='beltblast') updateAsteroids(dt);
   updateShieldStation(dt);
   updateTractorPull(dt);
   updateIdleRegen(dt);
@@ -4426,6 +4836,17 @@ function update(dt){
     if(!player.alive){ endGame(false,'warpcoreDied'); }
     else if(warpBaseFilledCount('A')>=3){ endGame(true,'warpcoreWon'); }
     else if(warpBaseFilledCount('B')>=3){ endGame(false,'warpcoreLost'); }
+  } else if(gameMode==='beltblast'){
+    if(!player.alive){ endGame(false,'beltblastDied'); }
+    else {
+      beltBlastTimeLeft -= dt;
+      if(beltBlastTimeLeft<=0){
+        var myPct=beltBlastPct(player.team), enemyPct=beltBlastPct(otherTeam(player.team));
+        if(myPct>enemyPct) endGame(true,'beltblastWon');
+        else if(myPct<enemyPct) endGame(false,'beltblastLost');
+        else endGame(false,'beltblastDraw');
+      }
+    }
   } else {
     var botsAlive=0;
     for(var i=0;i<bots.length;i++) if(bots[i].alive) botsAlive++;
@@ -4523,10 +4944,11 @@ function drawShipShape(e){
   ctx.fill(); ctx.stroke();
   ctx.beginPath(); ctx.arc(0,0,3,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill();
 
-  // Warp Core team shield ring -- blue for Team A, red for Team B, so
-  // teammates/enemies are identifiable at a glance regardless of which
-  // ship type (and therefore hull color) each side happens to be flying.
-  if(gameMode==='warpcore' && e.team){
+  // Team shield ring (Warp Core and Belt Blast) -- blue for Team A, red
+  // for Team B, so teammates/enemies are identifiable at a glance
+  // regardless of which ship type (and therefore hull color) each side
+  // happens to be flying.
+  if((gameMode==='warpcore'||gameMode==='beltblast') && e.team){
     var shieldCol = e.team==='A' ? '#00d4ff' : '#ff4444';
     ctx.strokeStyle=shieldCol; ctx.shadowColor=shieldCol; ctx.shadowBlur=8; ctx.lineWidth=1.5;
     ctx.beginPath(); ctx.arc(0,0,24,0,Math.PI*2); ctx.stroke();
@@ -4607,6 +5029,32 @@ function drawObstacle(o){
   ctx.restore();
 }
 
+// Belt Blast: a jagged rocky circle, colored neutral brown/orange or
+// team cyan/red once claimed. The jag offsets are generated once per
+// asteroid (in makeAsteroid) so the shape stays stable frame to frame.
+function drawAsteroid(a){
+  var fill = a.color==='A' ? '#00d4ff' : a.color==='B' ? '#ff4444' : '#c98a4b';
+  ctx.save();
+  ctx.translate(a.x,a.y);
+  ctx.rotate(a.spinBase + performance.now()*a.spin);
+  ctx.fillStyle=fill;
+  ctx.strokeStyle=a.color==='neutral' ? 'rgba(255,210,150,0.5)' : 'rgba(255,255,255,0.6)';
+  ctx.shadowColor=fill; ctx.shadowBlur=6;
+  ctx.lineWidth=1.5;
+  ctx.beginPath();
+  var n=a.jag.length;
+  for(var i=0;i<n;i++){
+    var ang=(i/n)*Math.PI*2;
+    var rr=a.r*a.jag[i];
+    var px=Math.cos(ang)*rr, py=Math.sin(ang)*rr;
+    if(i===0) ctx.moveTo(px,py); else ctx.lineTo(px,py);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.restore();
+}
+
 function drawWorld(){
   for(var i=0;i<bgStars.length;i++){
     var s=bgStars[i]; s.tw+=s.ts;
@@ -4625,6 +5073,7 @@ function drawWorld(){
   ctx.shadowBlur=0;
 
   for(var i=0;i<obstacles.length;i++) drawObstacle(obstacles[i]);
+  for(var i=0;i<asteroids.length;i++) drawAsteroid(asteroids[i]);
 
   drawShieldStation();
   for(var i=0;i<nebulaClouds.length;i++) drawNebulaCloud(nebulaClouds[i]);
@@ -4801,6 +5250,11 @@ function drawMinimap(){
     var o=obstacles[i];
     mx.fillStyle='rgba(100,140,190,0.35)';
     mx.fillRect(o.x*scaleX,o.y*scaleY,Math.max(1,o.w*scaleX),Math.max(1,o.h*scaleY));
+  }
+  for(var i=0;i<asteroids.length;i++){
+    var ast=asteroids[i];
+    mx.fillStyle = ast.color==='A' ? 'rgba(0,212,255,0.9)' : ast.color==='B' ? 'rgba(255,68,68,0.9)' : 'rgba(190,130,70,0.85)';
+    mx.beginPath(); mx.arc(ast.x*scaleX,ast.y*scaleY,Math.max(1,ast.r*scaleX),0,Math.PI*2); mx.fill();
   }
   mx.fillStyle='rgba(80,255,180,0.85)';
   mx.beginPath(); mx.arc(shieldStation.x*scaleX,shieldStation.y*scaleY,3.5,0,Math.PI*2); mx.fill();
