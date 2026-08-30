@@ -776,7 +776,11 @@ function resolveObstacles(ent){
 // Belt Blast: circle-circle push-apart against every live asteroid,
 // generalizing resolveObstacles' penetration-depth math. Asteroids are
 // treated as effectively immovable for the push (like the static wall
-// obstacles) -- only the ship is displaced. No hp change on contact.
+// obstacles) -- only the ship is displaced. A physical impact also deals
+// hp damage scaled by the asteroid's size (through the shared applyDamage
+// path, so a Perma-Shield bonus pool absorbs it first), gated by the same
+// brief post-hit invincibility window bullets use so a ship wedged
+// against an asteroid isn't shredded every single frame.
 function resolveAsteroids(ent){
   for(var i=0;i<asteroids.length;i++){
     var a=asteroids[i];
@@ -786,6 +790,19 @@ function resolveAsteroids(ent){
     if(push>0){
       ent.x += (dx/d)*push;
       ent.y += (dy/d)*push;
+      if(ent.alive && ent.invincible<=0){
+        applyDamage(ent, BELT_COLLISION_DAMAGE[a.size]);
+        spawnBurst(ent.x,ent.y,'#c98a4b',6);
+        sfxHit();
+        ent.invincible = 250;
+        if(ent.hp<=0 && ent.alive){
+          ent.alive=false;
+          spawnBurst(ent.x,ent.y,ent.def.color,28);
+          sfxShipExplosion();
+          dropCarriedCores(ent);
+          if(!ent.isPlayer) ent.respawnTimer=rnd(3000,5000);
+        }
+      }
     }
   }
 }
@@ -1005,6 +1022,7 @@ var asteroids=[]; // [{x,y,vx,vy,size:'large'|'medium'|'small',r,color:'neutral'
 var BELT_ASTEROID_START_COUNT=12;
 var BELT_ASTEROID_CAP=48;
 var BELT_SIZE_R={large:34, medium:22, small:13};
+var BELT_COLLISION_DAMAGE={large:14, medium:9, small:5}; // hp lost on physical impact, scaled by asteroid size
 var BELT_BLAST_MATCH_MS=120000;
 var beltBlastTimeLeft=0;
 
