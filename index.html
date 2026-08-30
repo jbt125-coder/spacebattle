@@ -723,6 +723,7 @@ function buildStars(){
    OBSTACLES
 ===================================================================== */
 var obstacles=[];
+var WARP_BASE_CLEARANCE=180; // keeps obstacles off a Warp Core base's delivery slots (radius 46) with room to approach
 function genObstacles(){
   obstacles=[];
   for(var i=0;i<8;i++){
@@ -732,6 +733,13 @@ function genObstacles(){
       x=rnd(150, WW-150-w);
       y=rnd(150, WH-150-h);
       ok = dst(x+w/2,y+h/2, WW/2, WH/2) > 260;
+      if(ok && gameMode==='warpcore'){
+        var rect={x:x,y:y,w:w,h:h};
+        // WARP_BASE_A/B are declared further down but already assigned by
+        // the time a match actually runs genObstacles.
+        ok = !circleRectHit(WARP_BASE_A.x, WARP_BASE_A.y, WARP_BASE_CLEARANCE, rect)
+          && !circleRectHit(WARP_BASE_B.x, WARP_BASE_B.y, WARP_BASE_CLEARANCE, rect);
+      }
       tries++;
     } while(!ok && tries<20);
     obstacles.push({x:x,y:y,w:w,h:h});
