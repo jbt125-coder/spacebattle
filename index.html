@@ -4652,13 +4652,22 @@ function updateBullets(dt){
       }
     }
 
-    // Deputy turrets: any bullet that touches one destroys it outright --
+    // Deputy turrets: any ENEMY bullet that touches one destroys it outright --
     // no kill credit, no gem drop, no ability-charge/invincibility bookkeeping,
-    // it's not a "ship" for scoring purposes.
+    // it's not a "ship" for scoring purposes. A turret is immune to its own
+    // owner's fire (including another turret THAT SAME player has out) and
+    // to a teammate's fire, exactly like ships are already immune to
+    // friendly fire (the `tgt!==bl.owner && isEnemyOf(...)` pattern in the
+    // ship-hit loop above) -- only an actual enemy (their ship or one of
+    // THEIR turrets) can shoot it down. The explicit owner-identity check
+    // is required on top of isEnemyOf: in free-for-all Arena mode (no
+    // teams) isEnemyOf is a no-op that always returns true, so it alone
+    // can't tell "your own turret" apart from anyone else's.
     if(!removed){
       for(var tu=0;tu<turrets.length;tu++){
         var trt=turrets[tu];
         if(!trt.alive || trt.indestructible || bulletAlreadyHit(bl,trt)) continue;
+        if(trt.ownerEnt===bl.owner || !isEnemyOf(bl.owner,trt.ownerEnt)) continue;
         if(dst(bl.x,bl.y,trt.x,trt.y) < 10+bl.size){
           trt.alive=false;
           spawnBurst(trt.x,trt.y,trt.color,10);
