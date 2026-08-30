@@ -148,6 +148,26 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 .stationBtn .stationBtnDesc{font-size:9px;color:rgba(200,220,240,0.7);letter-spacing:0.3px;margin-top:4px;line-height:1.35;}
 .stationBtn.active{border-color:#44ff88;background:rgba(68,255,136,0.08);}
 
+#instructionsOverlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:96;display:none;align-items:center;justify-content:center;padding:16px;}
+#instructionsOverlay.show{display:flex;}
+#instructionsCard{background:rgba(0,10,24,0.98);border:1px solid rgba(0,212,255,0.35);border-radius:14px;padding:24px 24px 20px;max-width:400px;width:100%;position:relative;}
+#instructionsCard h2{font-size:15px;letter-spacing:3px;margin-bottom:16px;text-align:center;color:#00d4ff;text-shadow:0 0 10px rgba(0,212,255,0.5);}
+.instructionsBlock{margin-bottom:13px;}
+.instructionsBlock .lbl{font-size:8px;letter-spacing:2px;color:rgba(0,212,255,0.55);margin-bottom:4px;}
+.instructionsBlock p{font-size:10.5px;line-height:1.5;color:rgba(210,230,250,0.85);}
+#instructionsFooter{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:16px;}
+#letsBattleBtn{flex:1;background:rgba(0,212,255,0.12);border:2px solid #00d4ff;color:#00d4ff;font-family:inherit;font-weight:800;letter-spacing:2px;font-size:12px;padding:11px 10px;border-radius:8px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+#dontShowAgainRow{display:flex;align-items:center;gap:7px;font-size:8px;letter-spacing:0.5px;color:rgba(150,180,220,0.7);white-space:nowrap;}
+
+.toggleSwitch{position:relative;display:inline-block;width:32px;height:18px;flex-shrink:0;}
+.toggleSwitch input{opacity:0;width:0;height:0;position:absolute;}
+.toggleTrack{position:absolute;inset:0;background:rgba(0,212,255,0.15);border:1px solid rgba(0,212,255,0.35);border-radius:20px;cursor:pointer;transition:background .2s,border-color .2s;}
+.toggleTrack:before{content:"";position:absolute;height:12px;width:12px;left:2px;top:2px;background:rgba(150,180,220,0.7);border-radius:50%;transition:transform .2s,background .2s;}
+.toggleSwitch input:checked + .toggleTrack{background:rgba(0,212,255,0.35);border-color:#00d4ff;}
+.toggleSwitch input:checked + .toggleTrack:before{transform:translateX(14px);background:#00d4ff;box-shadow:0 0 6px #00d4ff;}
+.cogToggleRow{display:flex;align-items:center;justify-content:space-between;}
+.cogToggleRow span{font-size:9px;letter-spacing:1px;color:rgba(200,220,240,0.8);}
+
 /* Invite / join multiplayer UI */
 #inviteModalOverlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.65);z-index:96;display:none;align-items:center;justify-content:center;padding:16px;}
 #inviteModalOverlay.show{display:flex;}
@@ -243,6 +263,38 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
       <div id="musicStatus">No music loaded</div>
       <div class="volRow"><span>MUSIC VOL</span><input type="range" class="volSlider" id="musicVol" min="0" max="100" value="60"></div>
       <div class="volRow"><span>SFX VOL</span><input type="range" class="volSlider" id="sfxVol" min="0" max="100" value="40"></div>
+    </div>
+    <div class="cogSection">
+      <label>PRE-BATTLE INSTRUCTIONS</label>
+      <div class="cogToggleRow">
+        <span id="instructionsCogLabel">ON</span>
+        <label class="toggleSwitch"><input type="checkbox" id="instructionsCogToggle"><span class="toggleTrack"></span></label>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="instructionsOverlay">
+  <div id="instructionsCard">
+    <h2 id="instructionsTitle">BATTLE ARENA</h2>
+    <div class="instructionsBlock">
+      <div class="lbl">GOAL</div>
+      <p id="instructionsGoal"></p>
+    </div>
+    <div class="instructionsBlock">
+      <div class="lbl">REWARDS</div>
+      <p id="instructionsRewards"></p>
+    </div>
+    <div class="instructionsBlock">
+      <div class="lbl">WHAT REWARDS ARE FOR</div>
+      <p id="instructionsRewardsUse"></p>
+    </div>
+    <div id="instructionsFooter">
+      <div id="dontShowAgainRow">
+        <label class="toggleSwitch"><input type="checkbox" id="dontShowAgainToggle"><span class="toggleTrack"></span></label>
+        <span>Don't show again</span>
+      </div>
+      <button id="letsBattleBtn">LET'S BATTLE</button>
     </div>
   </div>
 </div>
@@ -436,7 +488,7 @@ var SPACE_STATION_UPGRADE_COST=25;
 var progress=null;
 
 function defaultProgress(){
-  var p={bank:0, ships:{}, galacticBucks:0, pendingUpgrade:null};
+  var p={bank:0, ships:{}, galacticBucks:0, pendingUpgrade:null, showInstructions:true};
   for(var i=0;i<SHIPS.length;i++){
     p.ships[SHIPS[i].id]={speedLvl:0, damageLvl:0, shieldLvl:0};
   }
@@ -470,6 +522,7 @@ function loadProgress(){
   if(typeof p.bank!=='number') p.bank=0;
   if(typeof p.galacticBucks!=='number') p.galacticBucks=0;
   if(p.pendingUpgrade===undefined) p.pendingUpgrade=null;
+  if(typeof p.showInstructions!=='boolean') p.showInstructions=true;
   if(!p.ships) p.ships={};
   // Fill in any ships missing from an older/partial save
   for(var i=0;i<SHIPS.length;i++){
@@ -1282,9 +1335,18 @@ window.onYouTubeIframeAPIReady=function(){
 /* =====================================================================
    COG MENU WIRING
 ===================================================================== */
-document.getElementById('cogBtn').addEventListener('click',function(){ document.getElementById('cogMenuOverlay').classList.add('show'); });
+document.getElementById('cogBtn').addEventListener('click',function(){ document.getElementById('cogMenuOverlay').classList.add('show'); syncInstructionsCogToggle(); });
 document.getElementById('closeCog').addEventListener('click',function(){ document.getElementById('cogMenuOverlay').classList.remove('show'); });
 document.getElementById('cogMenuOverlay').addEventListener('click',function(e){ if(e.target===this) this.classList.remove('show'); });
+function syncInstructionsCogToggle(){
+  document.getElementById('instructionsCogToggle').checked=!!progress.showInstructions;
+  document.getElementById('instructionsCogLabel').textContent = progress.showInstructions ? 'ON' : 'OFF';
+}
+document.getElementById('instructionsCogToggle').addEventListener('change',function(){
+  progress.showInstructions=this.checked;
+  saveProgress();
+  syncInstructionsCogToggle();
+});
 document.getElementById('ytStop').addEventListener('click',function(){
   if(ytPlayer&&ytPlayer.pauseVideo){ ytPlayer.pauseVideo(); ytPlayer.mute(); }
   document.getElementById('musicStatus').textContent='Stopped';
@@ -2115,17 +2177,77 @@ function setGameMode(mode){
 }
 document.getElementById('modeArenaBtn').addEventListener('click',function(){ setGameMode('arena'); });
 document.getElementById('modeWarpBtn').addEventListener('click',function(){ setGameMode('warpcore'); });
-document.getElementById('launchBtn').addEventListener('click',function(){
-  if(netRole==='guest'){
-    document.getElementById('selectScreen').style.display='none';
-    document.getElementById('joinScreen').style.display='flex';
-    document.getElementById('joinStatus').textContent='Ship chosen! Waiting for the host to launch...';
-    netSend({type:'chooseShip', shipId:selectedShip.id, levels:getShipProgress(selectedShip.id)});
-    return;
+// Pre-battle instructions -- explains the goal/rewards for whichever mode
+// is currently selected, gated behind progress.showInstructions so it can
+// be permanently dismissed (the "don't show again" toggle here, or the
+// mirrored toggle in the cog menu, both just flip this one saved flag).
+// Built lazily (not a static object) since it's evaluated the first time a
+// modal opens, well after GEMS_TO_WIN/GALACTIC_BUCKS_PER_WIN/etc. are all
+// defined further down the script -- a static literal here would freeze in
+// their pre-assignment `undefined` values.
+function getInstructionsContent(mode){
+  if(mode==='warpcore'){
+    return {
+      title: 'WARP CORE',
+      goal: 'A 3v3 team battle. Track down all 3 of your team\'s warp cores, hidden across the map, and deliver them to your base before the enemy team delivers theirs.',
+      rewards: 'Win a Warp Core match and your team earns $'+GALACTIC_BUCKS_PER_WIN+' Galactic Bucks -- a currency separate from your gem chest.',
+      rewardsUse: 'Spend Galactic Bucks ($'+SPACE_STATION_UPGRADE_COST+' each) at the Space Station in the hangar on powerful one-battle upgrades for your next match: Destructo Missile, Extra Perma-Shield, Cloak, or a Deputy Drone.'
+    };
   }
-  document.getElementById('selectScreen').style.display='none';
-  if(gameMode==='warpcore') startWarpCoreGame();
-  else startGame();
+  return {
+    title: 'BATTLE ARENA',
+    goal: 'Down every enemy bot, or be the first to collect '+GEMS_TO_WIN+' gems -- whichever happens first wins the match.',
+    rewards: 'Every gem you personally collect also drops into your Hangar Chest, a currency that carries over between matches.',
+    rewardsUse: 'Spend chest gems ('+GEMS_PER_UPGRADE+' each) in the hangar to permanently upgrade a chosen ship\'s speed, damage, or shield -- upgrades stack forever.'
+  };
+}
+var pendingLaunchFn=null;
+function openInstructionsModal(afterFn){
+  pendingLaunchFn=afterFn;
+  var c=getInstructionsContent(gameMode);
+  document.getElementById('instructionsTitle').textContent=c.title;
+  document.getElementById('instructionsGoal').textContent=c.goal;
+  document.getElementById('instructionsRewards').textContent=c.rewards;
+  document.getElementById('instructionsRewardsUse').textContent=c.rewardsUse;
+  document.getElementById('dontShowAgainToggle').checked=false;
+  document.getElementById('instructionsOverlay').classList.add('show');
+}
+function closeInstructionsModal(){
+  document.getElementById('instructionsOverlay').classList.remove('show');
+  pendingLaunchFn=null;
+}
+document.getElementById('letsBattleBtn').addEventListener('click',function(){
+  if(document.getElementById('dontShowAgainToggle').checked){
+    progress.showInstructions=false;
+    saveProgress();
+    syncInstructionsCogToggle();
+  }
+  var fn=pendingLaunchFn;
+  document.getElementById('instructionsOverlay').classList.remove('show');
+  pendingLaunchFn=null;
+  if(fn) fn();
+});
+document.getElementById('instructionsOverlay').addEventListener('click',function(e){ if(e.target===this) closeInstructionsModal(); });
+
+document.getElementById('launchBtn').addEventListener('click',function(){
+  function doLaunch(){
+    if(netRole==='guest'){
+      document.getElementById('selectScreen').style.display='none';
+      document.getElementById('joinScreen').style.display='flex';
+      document.getElementById('joinStatus').textContent='Ship chosen! Waiting for the host to launch...';
+      netSend({type:'chooseShip', shipId:selectedShip.id, levels:getShipProgress(selectedShip.id)});
+      return;
+    }
+    document.getElementById('selectScreen').style.display='none';
+    if(gameMode==='warpcore') startWarpCoreGame();
+    else startGame();
+  }
+  // window.__skipInstructionsModal: read-only-by-convention hook for
+  // automated tests (same pattern as window.__titleDummyFighters) so a
+  // test can bypass the pre-battle modal without needing to actually
+  // click through it every single time it launches a match.
+  if(progress.showInstructions && !window.__skipInstructionsModal) openInstructionsModal(doLaunch);
+  else doLaunch();
 });
 document.getElementById('inviteFriendBtn').addEventListener('click',function(){
   document.getElementById('inviteModalOverlay').classList.add('show');
