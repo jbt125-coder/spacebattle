@@ -104,7 +104,11 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 .shipCardName{font-weight:800;letter-spacing:1.5px;font-size:12px;margin-top:4px;text-align:center;}
 .shipCardRole{font-size:9px;color:rgba(150,180,220,0.6);margin-top:2px;letter-spacing:1px;text-transform:uppercase;text-align:center;}
 .shipCardUpgradeBtn{margin-top:7px;width:100%;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.4);border-radius:5px;color:#66eaff;font-family:inherit;font-size:8px;letter-spacing:1.5px;padding:6px 4px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
-#shipDetail{margin-top:14px;width:100%;max-width:520px;border:1px solid rgba(0,212,255,0.2);border-left:3px solid #00d4ff;background:rgba(10,20,35,0.8);border-radius:8px;padding:12px 14px;font-size:11.5px;color:rgba(200,220,240,0.85);line-height:1.5;min-height:50px;}
+#shipDetail{margin-top:14px;width:100%;max-width:520px;flex-shrink:0;border:1px solid rgba(0,212,255,0.2);border-left:3px solid #00d4ff;background:rgba(10,20,35,0.8);border-radius:8px;padding:12px 14px;font-size:12.65px;color:rgba(200,220,240,0.85);line-height:1.5;height:170px;overflow-y:auto;box-sizing:border-box;}
+.scrollBox::-webkit-scrollbar{width:6px;}
+.scrollBox::-webkit-scrollbar-track{background:rgba(0,212,255,0.06);border-radius:3px;}
+.scrollBox::-webkit-scrollbar-thumb{background:rgba(0,212,255,0.35);border-radius:3px;}
+.scrollBox::-webkit-scrollbar-thumb:hover{background:rgba(0,212,255,0.55);}
 #gemBankRow{font-size:10px;letter-spacing:2px;color:#66eaff;text-shadow:0 0 8px rgba(102,234,255,0.5);margin-bottom:12px;display:flex;align-items:center;gap:5px;}
 #gemBankRow .gicon{font-size:12px;}
 #bucksBankRow{font-size:10px;letter-spacing:2px;color:#ffb020;text-shadow:0 0 8px rgba(255,176,32,0.5);margin-bottom:12px;margin-top:-6px;display:flex;align-items:center;gap:5px;}
@@ -130,6 +134,8 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 #launchBtn{background:rgba(0,212,255,0.1);border:2px solid #00d4ff;color:#00d4ff;font-family:‘Orbitron’,monospace;font-weight:800;letter-spacing:3px;font-size:15px;padding:13px 40px;border-radius:8px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
 #inviteFriendBtn{margin-top:10px;background:transparent;border:1px solid rgba(0,212,255,0.4);color:#66eaff;font-family:inherit;font-weight:700;letter-spacing:2px;font-size:10px;padding:9px 22px;border-radius:6px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
 #spaceStationBtn{margin-bottom:10px;background:rgba(255,176,32,0.08);border:1.5px solid #ffb020;color:#ffb020;font-family:inherit;font-weight:800;letter-spacing:2px;font-size:11px;padding:9px 20px;border-radius:6px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+#claimRewardsBtn{margin-bottom:10px;background:rgba(68,255,136,0.08);border:1.5px solid #44ff88;color:#44ff88;font-family:inherit;font-weight:800;letter-spacing:2px;font-size:11px;padding:9px 20px;border-radius:6px;cursor:pointer;-webkit-tap-highlight-color:transparent;position:relative;}
+#claimRewardsBtn.hasClaimable::after{content:"";position:absolute;top:5px;right:8px;width:7px;height:7px;border-radius:50%;background:#ffb020;box-shadow:0 0 6px #ffb020;}
 #nextBattleRow{margin-top:8px;font-size:9.5px;letter-spacing:1px;color:#ffb020;display:flex;align-items:center;gap:8px;}
 #clearPendingUpgradeBtn{background:transparent;border:1px solid rgba(255,176,32,0.5);color:#ffb020;border-radius:50%;width:16px;height:16px;line-height:1;font-size:9px;cursor:pointer;-webkit-tap-highlight-color:transparent;padding:0;}
 
@@ -148,6 +154,25 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 .stationBtn .cost{color:#66eaff;font-size:9px;white-space:nowrap;}
 .stationBtn .stationBtnDesc{font-size:9px;color:rgba(200,220,240,0.7);letter-spacing:0.3px;margin-top:4px;line-height:1.35;}
 .stationBtn.active{border-color:#44ff88;background:rgba(68,255,136,0.08);}
+
+#challengesOverlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.65);z-index:95;display:none;align-items:center;justify-content:center;padding:16px;}
+#challengesOverlay.show{display:flex;}
+#challengesCard{background:rgba(0,10,24,0.98);border:1px solid rgba(68,255,136,0.35);border-radius:14px;padding:22px 22px 20px;max-width:420px;width:100%;position:relative;}
+#challengesCard h2{font-size:14px;letter-spacing:2px;margin-bottom:2px;text-align:center;color:#44ff88;}
+#challengesSub{text-align:center;font-size:9.5px;color:rgba(150,180,220,0.6);letter-spacing:0.5px;margin-bottom:12px;line-height:1.4;}
+#closeChallenges{position:absolute;top:13px;right:15px;background:transparent;border:none;color:rgba(68,255,136,0.55);font-size:19px;cursor:pointer;line-height:1;-webkit-tap-highlight-color:transparent;}
+#challengesList{display:flex;flex-direction:column;gap:10px;height:340px;overflow-y:auto;padding-right:4px;}
+.challengeCard{background:rgba(68,255,136,0.06);border:1px solid rgba(68,255,136,0.3);border-radius:6px;padding:10px 12px;flex-shrink:0;}
+.challengeTop{display:flex;justify-content:space-between;align-items:center;font-size:10.5px;letter-spacing:1px;font-weight:800;color:#44ff88;gap:8px;}
+.challengeReward{color:#ffb020;font-size:9px;white-space:nowrap;}
+.challengeDesc{font-size:9px;color:rgba(200,220,240,0.75);margin-top:4px;line-height:1.35;}
+.challengeProgress{font-size:9px;color:rgba(150,220,180,0.9);margin-top:6px;letter-spacing:0.5px;}
+.shipTallyGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;margin-top:6px;}
+.shipTallyItem{font-size:8px;letter-spacing:0.5px;color:rgba(150,180,220,0.5);padding:2px 4px;border-radius:3px;border:1px solid rgba(150,180,220,0.15);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.shipTallyItem.done{color:#44ff88;border-color:rgba(68,255,136,0.4);background:rgba(68,255,136,0.08);}
+.challengeClaimBtn{width:100%;margin-top:8px;background:rgba(68,255,136,0.1);border:1px solid rgba(68,255,136,0.5);color:#44ff88;font-family:inherit;font-size:9.5px;letter-spacing:1px;font-weight:800;padding:7px;border-radius:5px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+.challengeClaimBtn:disabled{opacity:0.35;cursor:default;}
+.challengeClaimBtn.claimed{border-color:rgba(150,180,220,0.3);color:rgba(150,180,220,0.6);background:transparent;}
 
 #instructionsOverlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:96;display:none;align-items:center;justify-content:center;padding:16px;}
 #instructionsOverlay.show{display:flex;}
@@ -337,12 +362,13 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
     </div>
     <button id="carouselRightBtn" class="carouselArrow" aria-label="Next ship">&#10095;</button>
   </div>
-  <div id="shipDetail">Select a ranger to view dossier.</div>
+  <div id="shipDetail" class="scrollBox">Select a ranger to view dossier.</div>
   <div id="nextBattleRow" style="display:none;">
     NEXT BATTLE: <span id="nextBattleVal"></span>
     <button id="clearPendingUpgradeBtn" aria-label="Cancel pending upgrade">&#10005;</button>
   </div>
   <div id="hangarActions">
+    <button id="claimRewardsBtn">&#9873; CLAIM REWARDS</button>
     <button id="spaceStationBtn">&#9737; SPACE STATION</button>
     <button id="launchBtn">LAUNCH</button>
     <button id="inviteFriendBtn">&#9670; INVITE FRIEND</button>
@@ -356,6 +382,15 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
     <div id="spaceStationSub">One-battle upgrades -- applied to whatever ship you launch next.</div>
     <div id="spaceStationBucksRow">BALANCE: $<span id="spaceStationBucksVal">0</span> Galactic Bucks</div>
     <div id="spaceStationButtons"></div>
+  </div>
+</div>
+
+<div id="challengesOverlay">
+  <div id="challengesCard">
+    <button id="closeChallenges">X</button>
+    <h2>WEEKLY CHALLENGES</h2>
+    <div id="challengesSub">Complete a challenge below, then tap it to claim the reward.</div>
+    <div id="challengesList" class="scrollBox"></div>
   </div>
 </div>
 
@@ -486,10 +521,28 @@ var LEGACY_SAVE_KEY='spaceRangersArenaProgress_v1';
 var GEMS_PER_UPGRADE=10;
 var GALACTIC_BUCKS_PER_WIN=5; // awarded for winning a Warp Core match
 var SPACE_STATION_UPGRADE_COST=25;
+var WEEK_MS=7*24*60*60*1000;
 var progress=null;
 
+// Weekly Challenges -- all 3 are active at once. The all-ships win tally
+// and its claim are permanent (never reset once earned); the Destructo
+// and Cloak kill trackers/claims reset on a rolling 7-day cycle from
+// whenever the previous cycle started (checkWeeklyChallengeRefresh).
+function defaultChallenges(){
+  var tally={};
+  for(var i=0;i<SHIPS.length;i++) tally[SHIPS[i].id]=false;
+  return {
+    weekStart: Date.now(),
+    allShipsWinTally: tally,
+    allShipsClaimed: false,
+    destructoKillCount: 0,
+    destructoClaimed: false,
+    cloakKillDone: false,
+    cloakClaimed: false
+  };
+}
 function defaultProgress(){
-  var p={bank:0, ships:{}, galacticBucks:0, pendingUpgrade:null, showInstructions:true};
+  var p={bank:0, ships:{}, galacticBucks:0, pendingUpgrade:null, showInstructions:true, challenges:defaultChallenges()};
   for(var i=0;i<SHIPS.length;i++){
     p.ships[SHIPS[i].id]={speedLvl:0, damageLvl:0, shieldLvl:0};
   }
@@ -524,6 +577,17 @@ function loadProgress(){
   if(typeof p.galacticBucks!=='number') p.galacticBucks=0;
   if(p.pendingUpgrade===undefined) p.pendingUpgrade=null;
   if(typeof p.showInstructions!=='boolean') p.showInstructions=true;
+  if(!p.challenges) p.challenges=defaultChallenges();
+  if(!p.challenges.allShipsWinTally) p.challenges.allShipsWinTally={};
+  for(var i=0;i<SHIPS.length;i++){
+    if(typeof p.challenges.allShipsWinTally[SHIPS[i].id]!=='boolean') p.challenges.allShipsWinTally[SHIPS[i].id]=false;
+  }
+  if(typeof p.challenges.allShipsClaimed!=='boolean') p.challenges.allShipsClaimed=false;
+  if(typeof p.challenges.destructoKillCount!=='number') p.challenges.destructoKillCount=0;
+  if(typeof p.challenges.destructoClaimed!=='boolean') p.challenges.destructoClaimed=false;
+  if(typeof p.challenges.cloakKillDone!=='boolean') p.challenges.cloakKillDone=false;
+  if(typeof p.challenges.cloakClaimed!=='boolean') p.challenges.cloakClaimed=false;
+  if(typeof p.challenges.weekStart!=='number') p.challenges.weekStart=Date.now();
   if(!p.ships) p.ships={};
   // Fill in any ships missing from an older/partial save
   for(var i=0;i<SHIPS.length;i++){
@@ -535,6 +599,22 @@ function saveProgress(){
   try{ window.localStorage.setItem(SAVE_KEY, JSON.stringify(progress)); }catch(e){}
 }
 progress=loadProgress();
+// Rolling 7-day refresh for the Destructo/Cloak weekly challenges -- the
+// all-ships win tally is permanent and never touched here. Called at load
+// and again defensively wherever challenge progress is credited, in case
+// the tab's been open across a week boundary.
+function checkWeeklyChallengeRefresh(){
+  var now=Date.now();
+  if(now - progress.challenges.weekStart >= WEEK_MS){
+    progress.challenges.weekStart=now;
+    progress.challenges.destructoKillCount=0;
+    progress.challenges.destructoClaimed=false;
+    progress.challenges.cloakKillDone=false;
+    progress.challenges.cloakClaimed=false;
+    saveProgress();
+  }
+}
+checkWeeklyChallengeRefresh();
 
 function getShipProgress(shipId){ return progress.ships[shipId]; }
 
@@ -986,6 +1066,24 @@ function applyDamage(tgt, amount){
   }
   tgt.hp -= amount;
 }
+// Weekly Challenge progress -- called from every kill-detection site
+// (bullets/beam/gas clouds) right after a target is confirmed dead.
+// Solo-only (matches Space Station upgrades' own scoping): only the local
+// player's own kills count, never a bot's, a remote guest's, or anything
+// while hosting/joining a multiplayer match.
+function creditKillChallenges(killer, tgt){
+  if(killer!==player || netRole) return;
+  checkWeeklyChallengeRefresh();
+  var changed=false;
+  if(tgt.destructoMarked){
+    tgt.destructoMarked=false;
+    if(progress.challenges.destructoKillCount<3){ progress.challenges.destructoKillCount++; changed=true; }
+  }
+  if(player.cloakTimer>0 && !progress.challenges.cloakKillDone){
+    progress.challenges.cloakKillDone=true; changed=true;
+  }
+  if(changed) saveProgress();
+}
 
 /* =====================================================================
    GAS CLOUDS -- Nebula ship's regular weapon. Each trigger pull spawns one
@@ -1052,6 +1150,7 @@ function updateGasClouds(dt){
           spawnBurst(e.x,e.y,e.def.color,28);
           sfxShipExplosion();
           dropCarriedCores(e);
+          creditKillChallenges(c.owner, e);
           if(!e.isPlayer && (c.owner===player || c.owner===remotePlayer)){
             killCount++;
             spawnGem(e.x, e.y);
@@ -1974,6 +2073,7 @@ function updateDetail(){
   updateGemBankDisplay();
   updateBucksBankDisplay();
   updateNextBattleRow();
+  updateClaimRewardsDot();
 }
 
 function updateGemBankDisplay(){
@@ -2142,6 +2242,96 @@ document.getElementById('clearPendingUpgradeBtn').addEventListener('click',funct
   saveProgress();
   updateNextBattleRow();
 });
+
+/* =====================================================================
+   WEEKLY CHALLENGES -- all 3 are active at once (see creditKillChallenges
+   and the win-tracking in endGame for how progress gets credited). The
+   all-ships win tally/claim is permanent; destructo/cloak progress and
+   claims reset on a rolling 7-day cycle (checkWeeklyChallengeRefresh).
+===================================================================== */
+var CHALLENGE_DEFS=[
+  {id:'allShips', name:'FLEET MASTERY', desc:'Win a battle with every ship in the fleet (Arena or Warp Core).', gems:25, bucks:25},
+  {id:'destructo', name:'DESTRUCTO HUNTER', desc:'Destroy 3 ships with the Destructo Missile.', gems:15, bucks:15},
+  {id:'cloak', name:'GHOST KILL', desc:'Destroy a ship while cloaked.', gems:15, bucks:15}
+];
+function challengeStatus(id){
+  var c=progress.challenges;
+  if(id==='allShips'){
+    var won=0;
+    for(var i=0;i<SHIPS.length;i++){ if(c.allShipsWinTally[SHIPS[i].id]) won++; }
+    return { progressText: won+'/'+SHIPS.length+' ships', complete: won>=SHIPS.length, claimed: c.allShipsClaimed };
+  }
+  if(id==='destructo'){
+    return { progressText: c.destructoKillCount+'/3 kills', complete: c.destructoKillCount>=3, claimed: c.destructoClaimed };
+  }
+  return { progressText: c.cloakKillDone ? '1/1 -- done' : '0/1 kills', complete: c.cloakKillDone, claimed: c.cloakClaimed };
+}
+function anyChallengeClaimable(){
+  checkWeeklyChallengeRefresh();
+  for(var i=0;i<CHALLENGE_DEFS.length;i++){
+    var s=challengeStatus(CHALLENGE_DEFS[i].id);
+    if(s.complete && !s.claimed) return true;
+  }
+  return false;
+}
+function updateClaimRewardsDot(){
+  var btn=document.getElementById('claimRewardsBtn');
+  if(btn) btn.classList.toggle('hasClaimable', anyChallengeClaimable());
+}
+function openChallengesModal(){
+  document.getElementById('challengesOverlay').classList.add('show');
+  refreshChallengesModal();
+}
+function closeChallengesModal(){
+  document.getElementById('challengesOverlay').classList.remove('show');
+}
+function refreshChallengesModal(){
+  checkWeeklyChallengeRefresh();
+  var wrap=document.getElementById('challengesList');
+  wrap.innerHTML='';
+  for(var i=0;i<CHALLENGE_DEFS.length;i++){
+    (function(def){
+      var s=challengeStatus(def.id);
+      var card=document.createElement('div');
+      card.className='challengeCard';
+      var html='<div class="challengeTop"><span>'+def.name+'</span><span class="challengeReward">'+def.gems+' GEMS + $'+def.bucks+'</span></div>';
+      html+='<div class="challengeDesc">'+def.desc+'</div>';
+      html+='<div class="challengeProgress">'+s.progressText+'</div>';
+      if(def.id==='allShips'){
+        html+='<div class="shipTallyGrid">';
+        for(var si=0;si<SHIPS.length;si++){
+          var done=progress.challenges.allShipsWinTally[SHIPS[si].id];
+          html+='<span class="shipTallyItem'+(done?' done':'')+'">'+(done?'✓ ':'')+SHIPS[si].name+'</span>';
+        }
+        html+='</div>';
+      }
+      var btnLabel = s.claimed ? 'CLAIMED' : (s.complete ? 'CLAIM REWARD' : 'IN PROGRESS');
+      html+='<button class="challengeClaimBtn'+(s.claimed?' claimed':'')+'" '+((!s.complete||s.claimed)?'disabled':'')+'>'+btnLabel+'</button>';
+      card.innerHTML=html;
+      card.querySelector('.challengeClaimBtn').addEventListener('click', function(){ claimChallenge(def.id); });
+      wrap.appendChild(card);
+    })(CHALLENGE_DEFS[i]);
+  }
+  updateClaimRewardsDot();
+}
+function claimChallenge(id){
+  var s=challengeStatus(id);
+  if(!s.complete || s.claimed) return;
+  var def=CHALLENGE_DEFS.filter(function(d){ return d.id===id; })[0];
+  progress.bank += def.gems;
+  progress.galacticBucks += def.bucks;
+  if(id==='allShips') progress.challenges.allShipsClaimed=true;
+  else if(id==='destructo') progress.challenges.destructoClaimed=true;
+  else if(id==='cloak') progress.challenges.cloakClaimed=true;
+  saveProgress();
+  showAlert(def.name+' CLAIMED -- +'+def.gems+' GEMS, +$'+def.bucks, 2600);
+  refreshChallengesModal();
+  updateGemBankDisplay();
+  updateBucksBankDisplay();
+}
+document.getElementById('claimRewardsBtn').addEventListener('click', openChallengesModal);
+document.getElementById('closeChallenges').addEventListener('click', closeChallengesModal);
+document.getElementById('challengesOverlay').addEventListener('click',function(e){ if(e.target===this) closeChallengesModal(); });
 
 var cardT=0;
 function animateCards(){
@@ -2339,7 +2529,8 @@ function makeShipEntity(def,x,y,isPlayer){
     carryingCores:[], // Warp Core mode: warp cores this ship is currently holding
     destructoPending:false, // Space Station: next bullet fired is a Destructo Missile
     bonusShieldHp:0, bonusShieldTimer:0, // Space Station: Extra Perma-shield bonus pool
-    cloakTimer:0 // Space Station: Cloak -- forces `concealed` regardless of nebula position
+    cloakTimer:0, // Space Station: Cloak -- forces `concealed` regardless of nebula position
+    destructoMarked:false // Weekly Challenge: hit by the player's Destructo Missile and not yet finished off
   };
 }
 
@@ -2370,6 +2561,7 @@ function respawnBot(b){
   b.ammo=MAX_AMMO; b.ammoRegenTimer=0; b.abilityCharge=1; b.hitStreak=0;
   b.comboStreak=0; b.anchoredTimer=0; b.concealed=false; b.revealTimer=0;
   b.carryingCores=[]; // team is left untouched -- a respawned bot stays on its own side
+  b.destructoMarked=false;
 }
 
 function showAlert(txt,dur){
@@ -2494,6 +2686,7 @@ function updateBeamWeapon(ent, dt){
       spawnBurst(tgt.x,tgt.y,tgt.def.color,28);
       sfxShipExplosion();
       dropCarriedCores(tgt);
+      creditKillChallenges(ent, tgt);
       if(!tgt.isPlayer && (ent===player || ent===remotePlayer)){
         killCount++;
         spawnGem(tgt.x, tgt.y);
@@ -3349,6 +3542,14 @@ function endGame(won, reason, customTitle, customSub){
   }
   document.getElementById('gameOverScreen').classList.remove('hidden');
 
+  if(won && !netRole){ // Weekly Challenge: track wins per-ship, solo-only
+    checkWeeklyChallengeRefresh();
+    if(!progress.challenges.allShipsWinTally[selectedShip.id]){
+      progress.challenges.allShipsWinTally[selectedShip.id]=true;
+      saveProgress();
+    }
+  }
+
   if(netRole==='host'){
     netSend({type:'matchEnd', reason:reason||(won?'gems':'hostDied')});
   }
@@ -3979,6 +4180,7 @@ function updateBullets(dt){
           var dmgMult=1;
           if(bl.isDestructoMissile){
             applyDamage(tgt, tgt.hp*0.99); // 99% of current hp, bypassing combo/nebula multipliers
+            if(bl.owner===player) tgt.destructoMarked=true; // Weekly Challenge: credited when this target is finished off
             spawnBurst(bl.x,bl.y,bl.color, 30);
           } else {
             if(bl.comboEligible && bl.comboTracker){
@@ -4020,6 +4222,7 @@ function updateBullets(dt){
             spawnBurst(tgt.x,tgt.y,tgt.def.color,28);
             sfxShipExplosion();
             dropCarriedCores(tgt);
+            creditKillChallenges(bl.owner, tgt);
             if(!tgt.isPlayer && (bl.owner===player || bl.owner===remotePlayer)){
               killCount++;
               spawnGem(tgt.x, tgt.y);
