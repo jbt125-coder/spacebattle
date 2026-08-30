@@ -834,7 +834,10 @@ function teamSpawnPoint(team){
 // concealment rules (not hidden a second time).
 function isCoreDetectableBy(observer, core){
   if(core.carriedBy) return isDetectableBy(observer, core.carriedBy);
-  return dst(observer.x,observer.y,core.x,core.y) <= WARP_CORE_DETECT_RANGE;
+  // A hauler bot (see updateBotAI_WarpCore) carries a boosted coreDetectRange
+  // to reflect it actively scanning for cores instead of just stumbling onto
+  // them at the same range everyone else notices one.
+  return dst(observer.x,observer.y,core.x,core.y) <= (observer.coreDetectRange || WARP_CORE_DETECT_RANGE);
 }
 function isCoreVisibleToViewer(core){
   if(core.carriedBy) return isVisibleToViewer(core.carriedBy);
@@ -3119,16 +3122,25 @@ function startWarpCoreGame(){
   document.getElementById('shipNameVal').style.color=selectedShip.color;
   document.getElementById('abilityIcon').textContent=selectedShip.ability.icon;
 
+  // One bot per team is a designated "hauler" -- it beelines for any core
+  // it can detect instead of preempting that to chase a fight (see
+  // updateBotAI_WarpCore), and detects cores from farther away, so a match
+  // always has at least one ship actively hunting cores down rather than
+  // every bot defaulting to whichever enemy is nearest.
   for(var i=0;i<2;i++){
     var sp=teamSpawnPoint('A');
     var b=makeShipEntity(SHIPS[rndI(0,SHIPS.length-1)], sp.x, sp.y, false);
     b.team='A'; b.hp *= 0.85; b.maxHp=b.hp;
+    b.warpRole = i===0 ? 'hauler' : 'fighter';
+    if(b.warpRole==='hauler') b.coreDetectRange = WARP_CORE_DETECT_RANGE*1.6;
     bots.push(b);
   }
   for(var i=0;i<3;i++){
     var sp2=teamSpawnPoint('B');
     var b2=makeShipEntity(SHIPS[rndI(0,SHIPS.length-1)], sp2.x, sp2.y, false);
     b2.team='B'; b2.hp *= 0.85; b2.maxHp=b2.hp;
+    b2.warpRole = i===0 ? 'hauler' : 'fighter';
+    if(b2.warpRole==='hauler') b2.coreDetectRange = WARP_CORE_DETECT_RANGE*1.6;
     bots.push(b2);
   }
 
@@ -3505,11 +3517,29 @@ function nearestEnemyShip(b){
 // updateBotAI so Battle Arena's AI is never touched. Both allied and enemy
 // bots run this same logic (just with opposite `team`), in priority order:
 // 1) carrying a core -> race it home, taking defensive shots along the way
-// 2) a detectable enemy is near -> skirmish it (same movement/fire math as
+// 2) a HAULER (see warpRole below) that can see a fetchable core beelines
+//    for it instead of picking a fight, still taking defensive shots along
+//    the way -- otherwise falls through to the same priority as a fighter
+// 3) a detectable enemy is near -> skirmish it (same movement/fire math as
 //    updateBotAI's skirmish block, just retargeted via nearestEnemyShip)
-// 3) otherwise -> fetch the nearest detectable, uncarried core this bot's
+// 4) otherwise -> fetch the nearest detectable, uncarried core this bot's
 //    team still needs
-// 4) nothing to do -> loiter near home base
+// 5) nothing to do -> loiter near home base
+//
+// Every bot gets a warpRole of 'hauler' or 'fighter' (assigned in
+// startWarpCoreGame, one hauler per team) so a match always has at least
+// one ship actively hunting cores instead of every bot defaulting to
+// whichever enemy is nearest -- a fighter still fetches a core once it has
+// nothing to fight (step 4), it just doesn't preempt a fight to go do it.
+function warpCoreDefensiveFire(b, enemy, dt){
+  b.cooldown -= dt;
+  if(!b.def.beamWeapon && enemy && b.cooldown<=0 && dst(b.x,b.y,enemy.x,enemy.y)<220 && b.ammo>0){
+    var fireAngle=angTo(b.x,b.y,enemy.x,enemy.y);
+    if(b.def.coneWeapon){ spawnGasCone(b, fireAngle); b.cooldown=b.def.coneFireRate*1.8; }
+    else { beginFire(b, fireAngle); b.cooldown=b.def.fireRate*1.8; }
+    b.ammo--; b.idleTimer=0;
+  }
+}
 function updateBotAI_WarpCore(b, dt){
   b.aiDecisionTimer -= dt;
   b.thrusting=false;
@@ -3520,6 +3550,7 @@ function updateBotAI_WarpCore(b, dt){
 
   var idealRange = b.def.id==='longshot' ? 480 : (b.def.id==='swarmer' ? 150 : (b.def.id==='nebula' ? 170 : 280));
   var enemy=nearestEnemyShip(b);
+  var core=findNearestFetchableCore(b);
 
   if(b.carryingCores.length>0){
     b.aiState='return';
@@ -3536,17 +3567,32 @@ function updateBotAI_WarpCore(b, dt){
     var maxSp=b.def.maxSpeed*0.85*(b.anchoredTimer>0?0.5:1);
     if(sp>maxSp){ b.vx=b.vx/sp*maxSp; b.vy=b.vy/sp*maxSp; }
 
-    b.cooldown -= dt;
-    if(!b.def.beamWeapon && enemy && b.cooldown<=0 && dst(b.x,b.y,enemy.x,enemy.y)<220 && b.ammo>0){
-      var fireAngle=angTo(b.x,b.y,enemy.x,enemy.y);
-      if(b.def.coneWeapon){ spawnGasCone(b, fireAngle); b.cooldown=b.def.coneFireRate*1.8; }
-      else { beginFire(b, fireAngle); b.cooldown=b.def.fireRate*1.8; }
-      b.ammo--; b.idleTimer=0;
-    }
+    warpCoreDefensiveFire(b, enemy, dt);
     return;
   }
 
-  if(enemy){
+  if(b.warpRole==='hauler' && core){
+    b.aiState='fetch';
+    var coreAngleH=angTo(b.x,b.y,core.x,core.y);
+    var daH=angDiff(b.angle, coreAngleH);
+    b.angle += daH*0.10;
+    b.vx += Math.cos(b.angle)*0.15; b.vy += Math.sin(b.angle)*0.15;
+    b.thrusting=true;
+    b.vx *= b.def.drag; b.vy *= b.def.drag;
+    var spH=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
+    var maxSpH=b.def.maxSpeed*0.8*(b.anchoredTimer>0?0.5:1);
+    if(spH>maxSpH){ b.vx=b.vx/spH*maxSpH; b.vy=b.vy/spH*maxSpH; }
+
+    warpCoreDefensiveFire(b, enemy, dt);
+    return;
+  }
+
+  // A hauler with no core to fetch right now only breaks off to fight when
+  // the enemy is a genuine, close threat -- otherwise it goes scout (below)
+  // to actively hunt down more cores rather than picking fights far from
+  // anything core-related. A fighter engages anything detectable, unchanged.
+  var haulerShouldEngage = b.warpRole!=='hauler' || (enemy && dst(b.x,b.y,enemy.x,enemy.y) < 260);
+  if(enemy && haulerShouldEngage){
     b.aiState='engage';
     var d=dst(b.x,b.y,enemy.x,enemy.y);
     var angleToTarget=angTo(b.x,b.y,enemy.x,enemy.y);
@@ -3592,7 +3638,6 @@ function updateBotAI_WarpCore(b, dt){
     return;
   }
 
-  var core=findNearestFetchableCore(b);
   if(core){
     b.aiState='fetch';
     var coreAngle=angTo(b.x,b.y,core.x,core.y);
