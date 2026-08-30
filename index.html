@@ -28,7 +28,8 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 .hud-val.warn{color:#ff4444;text-shadow:0 0 12px rgba(255,68,68,0.6);}
 #shieldBar{width:120px;height:8px;background:rgba(0,212,255,0.15);border-radius:4px;border:1px solid rgba(0,212,255,0.3);overflow:hidden;margin-top:3px;}
 #shieldFill{height:100%;background:#00d4ff;border-radius:4px;transition:width 0.2s,background 0.3s;}
-#shieldFill.danger{background:#ff4444;}
+#shieldFill.teamB{background:#ff4444;}
+#shieldFill.danger{background:#ff4444;animation:blink 0.7s ease-in-out infinite;}
 #bonusShieldBar{width:120px;height:5px;background:rgba(255,176,32,0.12);border-radius:3px;border:1px solid rgba(255,176,32,0.35);overflow:hidden;margin-top:3px;}
 #bonusShieldFill{height:100%;background:#ffb020;border-radius:3px;transition:width 0.2s;}
 
@@ -3055,6 +3056,7 @@ function startGuestMatch(msg){
   gemsCollectedThisMatch=0;
   killCount=0;
   bullets=[]; particles=[]; gems=[]; bots=[]; turrets=[]; gasClouds=[];
+  warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
 
   player=makeShipEntity(selectedShip, WW/2, WH/2, true);
   player.eff=effectiveStatsFromLevels(selectedShip, getShipProgress(selectedShip.id));
@@ -3177,6 +3179,7 @@ function startGame(){
   player.angle=-Math.PI/2;
   player.invincible=1500;
   bots=[]; bullets=[]; particles=[]; gems=[]; turrets=[]; gasClouds=[]; killCount=0;
+  warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
   gemsCollectedThisMatch=0;
   remotePlayer=null;
   if(!netRole) applyPendingUpgrade(player); // Space Station upgrades are solo-only (after array resets so a spawned Deputy Drone survives)
@@ -3366,7 +3369,9 @@ document.getElementById('restartBtn').addEventListener('click',function(){
 function updateHUD(){
   var pct=clamp(player.hp/player.maxHp,0,1);
   document.getElementById('shieldFill').style.width=(pct*100)+'%';
-  document.getElementById('shieldFill').className = player.hp<=player.maxHp*0.25 ? 'danger' : '';
+  var shieldClasses = (gameMode==='warpcore' && player.team==='B') ? 'teamB' : ''; // red team gets a red shield bar, blue team keeps the default cyan
+  if(player.hp<=player.maxHp*0.25) shieldClasses += ' danger';
+  document.getElementById('shieldFill').className = shieldClasses.trim();
   var bonusBar=document.getElementById('bonusShieldBar');
   if(player.bonusShieldHp>0){
     bonusBar.style.display='';
@@ -4306,6 +4311,15 @@ function drawShipShape(e){
   }
   ctx.fill(); ctx.stroke();
   ctx.beginPath(); ctx.arc(0,0,3,0,Math.PI*2); ctx.fillStyle='#fff'; ctx.fill();
+
+  // Warp Core team shield ring -- blue for Team A, red for Team B, so
+  // teammates/enemies are identifiable at a glance regardless of which
+  // ship type (and therefore hull color) each side happens to be flying.
+  if(gameMode==='warpcore' && e.team){
+    var shieldCol = e.team==='A' ? '#00d4ff' : '#ff4444';
+    ctx.strokeStyle=shieldCol; ctx.shadowColor=shieldCol; ctx.shadowBlur=8; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.arc(0,0,24,0,Math.PI*2); ctx.stroke();
+  }
 
   if(e.def.id==='vanguard' && e.boosted>0){
     ctx.strokeStyle='rgba(255,255,255,0.6)';
