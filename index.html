@@ -465,10 +465,10 @@ var SHIPS = [
     id:'wraith', name:'WRAITH', role:'Blink Duelist', color:'#aa55ff', rgb:'170,85,255',
     hp:95, turnRate:0.075, thrustPower:0.26, maxSpeed:8.6, drag:0.985,
     fireRate:230, bulletSpeed:10.5, bulletDamage:7, bulletLife:1800,
-    burstCount:3, burstDelay:70, // each trigger pull fires 3 in a line for the cost of 1 shot
-    comboDamage:true, // consecutive landed hits double in damage, up to 8x
-    ability:{name:'PHASE BLINK', icon:'>>', cooldown:8500, duration:1, desc:'Instantly teleports forward, dashing through obstacles and fire.'},
-    desc:'Fragile but relentless. Every trigger pull rattles off a straight line of three rounds for the cost of one shot -- a full clip is nine rounds downrange. Landing hits back-to-back doubles each successive shot\'s damage, up to 8x. Pairs with a short-range teleport to reposition or finish a fleeing bot.'
+    burstCount:6, burstDelay:70, // each trigger pull fires 6 in a line for the cost of 1 shot
+    comboDamage:true, // landing consecutive hits on the SAME target within one burst ramps damage up to 8x (resets every trigger pull)
+    ability:{name:'PHASE BLINK', icon:'>>', cooldown:8500, duration:1, desc:'Blinks beside the nearest enemy, stunning it for 1.5s and unloading a point-blank burst.'},
+    desc:'Fragile but relentless. Every trigger pull rattles off a line of six rounds for the cost of one shot -- landing hits back-to-back on the same target ramps that burst\'s damage up to 8x. Phase Blink teleports Wraith right beside the nearest enemy, freezing it in place for 1.5 seconds and firing a full burst point-blank.'
   },
   {
     id:'longshot', name:'LONGSHOT', role:'Sniper', color:'#ffb020', rgb:'255,176,32',
@@ -2776,10 +2776,11 @@ function makeShipEntity(def,x,y,isPlayer){
     thrusting:false, // true this frame if applying thrust -- halves the idle regen rate
     ammo:MAX_AMMO, ammoRegenTimer:0, // limited-shot pool, regenerates over time
     abilityCharge:1, hitStreak:0, // ability starts charged; recharges via 3 landed hits
-    burstRemaining:0, burstTimer:0, burstAngle:0, // Wraith-style queued burst-fire follow-up shots
+    burstRemaining:0, burstTimer:0, burstAngle:0, activeBurstTracker:null, // Wraith-style queued burst-fire follow-up shots + this burst's per-target damage-ramp tracker
     beamActive:0, beamAngle:0, beamTickTimer:0, beamRangeNow:0, // beam-weapon (Bruiser) channel state
-    comboStreak:0, // consecutive landed hits from this ship's own comboDamage-eligible bullets
+    comboStreak:0, // consecutive landed hits from this ship's own comboDamage-eligible bullets (non-burst ships/turrets)
     anchoredTimer:0, // Deadeye's Anchor debuff: >0 while this ship's max speed is halved
+    stunnedTimer:0, // Wraith's Phase Blink: >0 while this ship can't move, turn, or fire
     concealed:false, revealTimer:0, // nebula cloud concealment state
     team:null, // 'A'|'B' in Warp Core mode; unused (always null) in Battle Arena
     carryingCores:[], // Warp Core mode: warp cores this ship is currently holding
@@ -2816,6 +2817,7 @@ function respawnBot(b){
   b.aiState='seek'; b.carryingGems=0; b.respawnTimer=0; b.idleTimer=0;
   b.ammo=MAX_AMMO; b.ammoRegenTimer=0; b.abilityCharge=1; b.hitStreak=0;
   b.comboStreak=0; b.anchoredTimer=0; b.concealed=false; b.revealTimer=0;
+  b.stunnedTimer=0; b.activeBurstTracker=null;
   b.carryingCores=[]; // team is left untouched -- a respawned bot stays on its own side
   b.destructoMarked=false;
 }
@@ -2829,7 +2831,12 @@ function showAlert(txt,dur){
 /* =====================================================================
    COMBAT HELPERS
 ===================================================================== */
-function fireBullet(owner, angle, forcePierce, isFlak, isAbilityShot){
+// `burstTracker`, when passed, is a fresh-per-burst {hits:[{target,count}]}
+// object shared by every bullet in one Wraith-style trigger pull (see
+// beginFire) -- the damage-ramp in updateBullets keys off it landing on the
+// SAME target within that one burst, instead of the older per-shooter
+// comboStreak (still used as-is when no tracker is passed, e.g. turrets).
+function fireBullet(owner, angle, forcePierce, isFlak, isAbilityShot, burstTracker){
   var def=owner.def;
   var dmg = (owner.isPlayer && owner.eff) ? owner.eff.bulletDamage : def.bulletDamage;
   if(inAnyNebula(owner)) dmg *= 2; // firing from inside a nebula cloud doubles shot damage
@@ -2848,7 +2855,7 @@ function fireBullet(owner, angle, forcePierce, isFlak, isAbilityShot){
     hitSet: [],
     isAbilityShot: !!isAbilityShot,
     isDestructoMissile: isDestructo,
-    comboEligible: !!def.comboDamage, comboTracker: owner,
+    comboEligible: !!def.comboDamage, comboTracker: burstTracker || owner,
     homing: !!def.homing, homingTarget: null, homingTurnRate: def.homingTurnRate||0.05, homingRange: def.homingRange||500
   });
 }
@@ -2862,10 +2869,14 @@ function bulletAlreadyHit(b, ent){
 // a burstCount), then arms a queued burst of follow-up shots in the same
 // locked direction for ships like Wraith, so the whole burst still counts
 // as a single ammo cost. Every "new shot" call site should go through this
-// instead of calling fireBullet directly.
+// instead of calling fireBullet directly. A comboDamage burst ship gets a
+// fresh per-target hit tracker every call, shared by the whole burst, so
+// the ramp always resets on the next trigger pull.
 function beginFire(ent, angle, forcePierce, isFlak, isAbilityShot){
-  fireBullet(ent, angle, forcePierce, isFlak, isAbilityShot);
   var burstCount=ent.def.burstCount||1;
+  var tracker = (ent.def.comboDamage && burstCount>1) ? {hits:[]} : null;
+  if(tracker) ent.activeBurstTracker=tracker;
+  fireBullet(ent, angle, forcePierce, isFlak, isAbilityShot, tracker);
   if(burstCount>1){
     ent.burstRemaining=burstCount-1;
     ent.burstAngle=angle;
@@ -2878,7 +2889,7 @@ function updateBurstFire(ent, dt){
   if(!ent.alive || ent.burstRemaining<=0) return;
   ent.burstTimer -= dt;
   if(ent.burstTimer<=0){
-    fireBullet(ent, ent.burstAngle);
+    fireBullet(ent, ent.burstAngle, false, false, false, ent.activeBurstTracker);
     ent.burstRemaining--;
     ent.burstTimer=ent.def.burstDelay||70;
   }
@@ -3051,6 +3062,25 @@ function nearestEnemyInFront(ent, range, coneHalfAngle){
   return best;
 }
 
+// Wraith's Phase Blink -- nearest living, detectable enemy anywhere around
+// `ent` (no forward-cone restriction, unlike nearestEnemyInFront) within
+// WRAITH_BLINK_RANGE. Respects concealment like every other targeting
+// helper -- can't blink onto someone you can't currently see.
+var WRAITH_BLINK_RANGE=500;
+var WRAITH_BLINK_STOP_DIST=50; // how close Wraith lands next to its target
+var WRAITH_STUN_MS=1500;
+function nearestBlinkTarget(ent){
+  var all=allShips(), best=null, bestD=Infinity;
+  for(var i=0;i<all.length;i++){
+    var e=all[i];
+    if(!e.alive || e===ent || !isEnemyOf(ent,e)) continue;
+    if(!isDetectableBy(ent,e)) continue;
+    var d=dst(ent.x,ent.y,e.x,e.y);
+    if(d<bestD && d<WRAITH_BLINK_RANGE){ bestD=d; best=e; }
+  }
+  return best;
+}
+
 /* =====================================================================
    ABILITY TRIGGER
 ===================================================================== */
@@ -3066,11 +3096,29 @@ function triggerAbilityFor(ent){
     ent.idleTimer=0;
     if(ent===player) sfxAbility();
     if(ent.def.id==='wraith'){
-      ent.x += Math.cos(ent.angle)*150;
-      ent.y += Math.sin(ent.angle)*150;
-      resolveObstacles(ent);
-      resolveAsteroids(ent);
-      spawnBurst(ent.x,ent.y,ent.def.color,16);
+      // Phase Blink: teleports right beside the nearest enemy (within
+      // WRAITH_BLINK_RANGE), stuns it for WRAITH_STUN_MS (can't move, turn,
+      // or fire -- see the stunnedTimer gates in updateControlledShip and
+      // the bot-AI dispatch/per-bot loop), and immediately unloads a full
+      // burst point-blank -- landing every shot on a frozen, adjacent
+      // target is exactly what makes the per-target damage ramp climb.
+      var blinkTarget = nearestBlinkTarget(ent);
+      if(blinkTarget){
+        var blinkAngle = angTo(ent.x, ent.y, blinkTarget.x, blinkTarget.y);
+        ent.x = blinkTarget.x - Math.cos(blinkAngle)*WRAITH_BLINK_STOP_DIST;
+        ent.y = blinkTarget.y - Math.sin(blinkAngle)*WRAITH_BLINK_STOP_DIST;
+        ent.angle = blinkAngle; // perfectly aimed at the target it just landed beside
+        resolveObstacles(ent);
+        resolveAsteroids(ent);
+        spawnBurst(ent.x,ent.y,ent.def.color,16);
+        blinkTarget.stunnedTimer = WRAITH_STUN_MS;
+        blinkTarget.vx=0; blinkTarget.vy=0;
+        spawnBurst(blinkTarget.x,blinkTarget.y,'#ffee00',10);
+        if(blinkTarget===player) showAlert('STUNNED!', 1500);
+        beginFire(ent, blinkAngle, false, false, true);
+      } else if(ent===player){
+        showAlert('NO TARGET IN RANGE', 1600);
+      }
     } else if(ent.def.id==='longshot'){
       fireBullet(ent, ent.angle, true, false, true);
     } else if(ent.def.id==='swarmer'){
@@ -4525,10 +4573,20 @@ function updateControlledShip(ent, input, dt, movementOnly){
       if(ent.def.id==='vanguard') ent.boosted=ent.abilityActive;
     }
     if(ent.anchoredTimer>0) ent.anchoredTimer -= dt;
+    if(ent.stunnedTimer>0) ent.stunnedTimer -= dt;
     if(ent.bonusShieldTimer>0){
       ent.bonusShieldTimer -= dt;
       if(ent.bonusShieldTimer<=0) ent.bonusShieldHp=0;
     }
+  }
+
+  // Wraith's Phase Blink stun: full lockdown -- no turning, thrusting, or
+  // firing until it wears off. Momentum is zeroed so it can't coast on
+  // whatever velocity it had when the stun landed.
+  if(ent.stunnedTimer>0){
+    ent.thrusting=false;
+    ent.vx=0; ent.vy=0;
+    return;
   }
 
   var turnRate=ent.def.turnRate;
@@ -4683,16 +4741,33 @@ function updateBullets(dt){
             if(bl.owner===player) tgt.destructoMarked=true; // Weekly Challenge: credited when this target is finished off
             spawnBurst(bl.x,bl.y,bl.color, 30);
           } else {
+            var burstTrackerHit = bl.comboTracker && bl.comboTracker.hits;
             if(bl.comboEligible && bl.comboTracker){
-              dmgMult = Math.pow(2, Math.min(bl.comboTracker.comboStreak,3)); // 1x/2x/4x/8x, capped
-              bl.comboTracker.comboStreak = Math.min(bl.comboTracker.comboStreak+1, 3);
+              if(burstTrackerHit){
+                // Wraith-style burst: ramp is keyed per TARGET within this
+                // one trigger pull (see beginFire's fresh {hits:[]} tracker).
+                var hitEntry=null;
+                for(var hi=0; hi<bl.comboTracker.hits.length; hi++){ if(bl.comboTracker.hits[hi].target===tgt){ hitEntry=bl.comboTracker.hits[hi]; break; } }
+                var targetStreak = hitEntry ? hitEntry.count : 0;
+                dmgMult = Math.pow(2, Math.min(targetStreak,3)); // 1x/2x/4x/8x, capped
+                if(hitEntry) hitEntry.count++; else bl.comboTracker.hits.push({target:tgt, count:1});
+              } else {
+                dmgMult = Math.pow(2, Math.min(bl.comboTracker.comboStreak,3)); // 1x/2x/4x/8x, capped
+                bl.comboTracker.comboStreak = Math.min(bl.comboTracker.comboStreak+1, 3);
+              }
             }
             applyDamage(tgt, bl.damage*dmgMult);
             spawnBurst(bl.x,bl.y,bl.color, dmgMult>1 ? Math.min(6*dmgMult,36) : 6);
           }
           sfxHit();
           bl.hitSet.push(tgt);
-          tgt.invincible = 250; // brief post-hit immunity so one bullet can't multi-tick
+          // Per-target burst-tracked bullets (Wraith) skip the usual post-hit
+          // invincibility window -- otherwise, since burstDelay (70ms) is
+          // shorter than this window (250ms), only the very first bullet of
+          // any burst could ever land and the ramp could never actually
+          // climb. Matches the beam weapon's same no-invincibility exception
+          // for a rapid-repeat weapon that's meant to keep ticking a target.
+          if(!burstTrackerHit) tgt.invincible = 250;
 
           // Deadeye's Anchor missile: on impact, slaps a 10s/50%-speed
           // anchor onto whatever it hit, on top of its own (halved) damage.
@@ -4904,11 +4979,11 @@ function update(dt){
   }
   updateNebulaStatus(dt);
   if(gameMode==='warpcore'){
-    for(var i=0;i<bots.length;i++){ if(bots[i].alive) updateBotAI_WarpCore(bots[i],dt); }
+    for(var i=0;i<bots.length;i++){ if(bots[i].alive && bots[i].stunnedTimer<=0) updateBotAI_WarpCore(bots[i],dt); }
   } else if(gameMode==='beltblast'){
-    for(var i=0;i<bots.length;i++){ if(bots[i].alive) updateBotAI_BeltBlast(bots[i],dt); }
+    for(var i=0;i<bots.length;i++){ if(bots[i].alive && bots[i].stunnedTimer<=0) updateBotAI_BeltBlast(bots[i],dt); }
   } else {
-    for(var i=0;i<bots.length;i++){ if(bots[i].alive) updateBotAI(bots[i],dt); }
+    for(var i=0;i<bots.length;i++){ if(bots[i].alive && bots[i].stunnedTimer<=0) updateBotAI(bots[i],dt); }
   }
   for(var i=0;i<bots.length;i++){
     var b=bots[i];
@@ -4919,6 +4994,15 @@ function update(dt){
       if(b.respawnTimer<=0){
         respawnBot(b);
       }
+      continue;
+    }
+    // Wraith's Phase Blink stun: full lockdown -- no AI decisions (skipped
+    // above), no movement, no queued burst/beam continuing to fire. Damage
+    // timers (invincible) still tick so a follow-up hit can land normally.
+    if(b.stunnedTimer>0){
+      b.stunnedTimer -= dt;
+      b.vx=0; b.vy=0; b.thrusting=false;
+      if(b.invincible>0) b.invincible -= dt;
       continue;
     }
     if(b.cooldown>0){} // handled inline in AI
@@ -5102,6 +5186,25 @@ function drawShipShape(e){
     ctx.beginPath(); ctx.arc(0,-4,2.2,0,Math.PI*2); ctx.fill(); // ring
     ctx.beginPath(); ctx.moveTo(0,-2); ctx.lineTo(0,6); ctx.stroke(); // shaft
     ctx.beginPath(); ctx.moveTo(-4,3); ctx.lineTo(0,6); ctx.lineTo(4,3); ctx.stroke(); // flukes
+    ctx.restore();
+  }
+  if(e.stunnedTimer>0){
+    // Wraith's Phase Blink stun -- a bright flashing yellow ring plus a
+    // couple of small "seeing stars" orbiting the hull for the whole 1.5s.
+    ctx.save();
+    var stunPulse=0.5+0.5*Math.sin(performance.now()*0.02);
+    ctx.strokeStyle='rgba(255,238,0,'+(0.4+0.4*stunPulse)+')'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(0,0,22,0,Math.PI*2); ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.rotate(performance.now()*0.006);
+    ctx.fillStyle='#ffee00'; ctx.shadowColor='#ffee00'; ctx.shadowBlur=6;
+    for(var starI=0;starI<3;starI++){
+      var starAng=(Math.PI*2/3)*starI;
+      var sx=Math.cos(starAng)*16, sy=Math.sin(starAng)*16-16;
+      ctx.beginPath(); ctx.arc(sx,sy,1.8,0,Math.PI*2); ctx.fill();
+    }
     ctx.restore();
   }
   ctx.restore();
