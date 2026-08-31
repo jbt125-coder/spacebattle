@@ -866,18 +866,18 @@ function resolveAsteroids(ent){
 
 /* =====================================================================
    GRAVITY MOON
-   A true side-view Lunar-Lander-style FFA. Constant gravity pulls every
-   ship toward a horizontal ground line near the bottom of the same WW/WH
-   world every other mode uses; thrusting with the nose pointed away from
-   the ground resists it. Six uniquely-colored cores sit at fixed pads
-   along the ground -- landing on an uncollected pad at a safe speed
-   claims it. Whoever holds all 6 wins; nobody is fully maneuverable until
-   they do.
+   A true side-view Lunar-Lander-style FFA. Gravity is brutal at the
+   start -- pointing the nose away from the jagged moon surface and
+   thrusting is close to mandatory just to survive -- and eases up (both
+   weaker gravity and stronger thrust/turning) with every core held. Six
+   uniquely-colored cores sit at fixed pads set into the terrain --
+   landing on an uncollected pad at a safe speed claims it. Whoever
+   holds all 6 wins.
 ===================================================================== */
-var GM_GROUND_Y = WH - 150; // horizontal ground line near the bottom of the shared world rect
-var GM_GRAVITY = 0.045; // constant downward accel applied every frame in this mode
+var GM_GRAVITY = 0.16; // constant downward accel at 0 cores held -- close to a slow ship's own thrustPower, so climbing demands near-perfect upward aim
+var GM_GRAVITY_REDUCTION_PER_CORE = 0.12; // each core held cuts effective gravity by another 12%, down to 28% of the base pull at 6
 var GM_SAFE_LANDING_SPEED = 3; // vy at/under this on touchdown = soft landing
-var GM_LETHAL_LANDING_SPEED = 7; // vy at/over this on touchdown = instant destroy
+var GM_LETHAL_LANDING_SPEED = 8; // vy at/over this on touchdown = instant destroy
 var GM_MANEUVER_PER_CORE = 0.15; // +15% thrust & turn rate per core held, up to +90% at 6
 var GM_PAD_PICKUP_RADIUS = 70;
 var GM_FALL_CAUTION_SPEED = 4; // bot AI: vy at/above this + close to the ground triggers the survival override
@@ -886,15 +886,62 @@ var GM_PAD_COLORS = [
   {id:'red', hex:'#ff4444'}, {id:'yellow', hex:'#ffee00'}, {id:'purple', hex:'#aa55ff'},
   {id:'green', hex:'#44ff88'}, {id:'blue', hex:'#3399ff'}, {id:'orange', hex:'#ff9922'}
 ];
-var gmCores=[]; // [{id,hex,padX,carriedBy}, ...] -- always 6, one per color, fixed pad position along GM_GROUND_Y
+var gmCores=[]; // [{id,hex,padX,padY,carriedBy}, ...] -- always 6, one per color, fixed pad set into the jagged terrain
+
+// Jagged moon-surface terrain, classic-Lunar-Lander style: a polyline of
+// {x,y} points spanning the width, with a flat shelf carved in wherever a
+// core pad sits so every pad is always a safe, level landing spot no
+// matter how rough the terrain around it gets.
+var GM_TERRAIN_SEGMENTS = 26;
+var GM_TERRAIN_MIN_Y = WH - 550; // highest peaks
+var GM_TERRAIN_MAX_Y = WH - 90;  // lowest valley floor
+var GM_PAD_FLAT_HALF_WIDTH = 100; // how wide a flat shelf is carved around each pad
+var gmTerrain = []; // [{x,y}, ...] sorted by x, defines the moon surface height at any point
+
+function gmTerrainHeightAt(x){
+  x = clamp(x, 0, WW);
+  for(var i=0;i<gmTerrain.length-1;i++){
+    var a=gmTerrain[i], b=gmTerrain[i+1];
+    if(x>=a.x && x<=b.x){
+      var t=(x-a.x)/((b.x-a.x)||1);
+      return a.y + (b.y-a.y)*t;
+    }
+  }
+  return gmTerrain.length ? gmTerrain[gmTerrain.length-1].y : GM_TERRAIN_MAX_Y;
+}
+
+function generateGravityMoonTerrain(){
+  gmTerrain=[];
+  var stepX=WW/(GM_TERRAIN_SEGMENTS-1);
+  var y=rnd(GM_TERRAIN_MIN_Y+80, GM_TERRAIN_MAX_Y-80);
+  for(var i=0;i<GM_TERRAIN_SEGMENTS;i++){
+    y = clamp(y+rnd(-170,170), GM_TERRAIN_MIN_Y, GM_TERRAIN_MAX_Y);
+    gmTerrain.push({x:i*stepX, y:y});
+  }
+  // Sample each pad's natural height from the raw jagged terrain BEFORE
+  // carving any shelves, so one pad's shelf never skews another's height.
+  for(var p=0;p<gmCores.length;p++) gmCores[p].padY = gmTerrainHeightAt(gmCores[p].padX);
+  // Carve an exact flat shelf under each pad: drop any grid points that
+  // fall inside it and insert two endpoints at the pad's height, so the
+  // whole span interpolates dead level no matter how the random-walk grid
+  // points happened to fall relative to this pad's x.
+  for(var p=0;p<gmCores.length;p++){
+    var padX=gmCores[p].padX, padY=gmCores[p].padY;
+    gmTerrain = gmTerrain.filter(function(pt){ return Math.abs(pt.x-padX) >= GM_PAD_FLAT_HALF_WIDTH; });
+    gmTerrain.push({x:padX-GM_PAD_FLAT_HALF_WIDTH, y:padY});
+    gmTerrain.push({x:padX+GM_PAD_FLAT_HALF_WIDTH, y:padY});
+  }
+  gmTerrain.sort(function(a,b){ return a.x-b.x; });
+}
 
 // Spreads the 6 colored cores evenly across the width, each parked at its
-// own pad until a ship lands on it.
+// own pad until a ship lands on it. padY is filled in afterward by
+// generateGravityMoonTerrain once the terrain height at that x is known.
 function placeGravityMoonCores(){
   gmCores=[];
   for(var i=0;i<GM_PAD_COLORS.length;i++){
     var frac = 0.12 + (0.76/(GM_PAD_COLORS.length-1))*i;
-    gmCores.push({id:GM_PAD_COLORS[i].id, hex:GM_PAD_COLORS[i].hex, padX:WW*frac, carriedBy:null});
+    gmCores.push({id:GM_PAD_COLORS[i].id, hex:GM_PAD_COLORS[i].hex, padX:WW*frac, padY:0, carriedBy:null});
   }
 }
 
@@ -907,8 +954,9 @@ function placeGravityMoonCores(){
 // destruction, per the chosen "return to spawn" rule.
 function resolveGravityMoonGround(ent){
   ent.gmLanded=false;
-  if(ent.y + ent.r < GM_GROUND_Y) return; // still airborne
-  ent.y = GM_GROUND_Y - ent.r;
+  var groundY=gmTerrainHeightAt(ent.x);
+  if(ent.y + ent.r < groundY) return; // still airborne
+  ent.y = groundY - ent.r;
   var impactSpeed = ent.vy;
   if(impactSpeed <= GM_SAFE_LANDING_SPEED){
     ent.vy = 0;
@@ -3974,14 +4022,16 @@ function startBeltBlastGame(){
 }
 
 // Gravity Moon mode: solo-only 3-way FFA (player + 2 random bots) against
-// constant gravity. Map furniture is generated exactly like Battle Arena
-// (no nebula clouds -- they don't fit the theme), plus the 6 core pads
-// along the ground. Every ship starts high above the surface, nose already
-// pointed straight up.
+// gravity and a jagged moon surface -- no rectangular obstacles or nebula
+// clouds, just open sky, the terrain, and the 6 core pads set into it.
+// Every ship starts high above the surface, nose already pointed straight
+// up.
 function startGravityMoonGame(){
-  genObstacles();
+  obstacles=[]; // no rectangular obstacles in this mode -- just the terrain
   placeShieldStation();
+  shieldStation.y = Math.min(shieldStation.y, GM_TERRAIN_MIN_Y-100); // keep it clear of even the tallest terrain peak
   placeGravityMoonCores();
+  generateGravityMoonTerrain();
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
   asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
 
@@ -4791,7 +4841,7 @@ function updateBotAI_GravityMoon(b, dt){
 
   var maneuverMul = 1 + b.gmCoresHeld.length*GM_MANEUVER_PER_CORE;
   var upAngle = -Math.PI/2;
-  var distToGround = GM_GROUND_Y - (b.y + b.r);
+  var distToGround = gmTerrainHeightAt(b.x) - (b.y + b.r);
 
   if(b.vy > GM_FALL_CAUTION_SPEED && distToGround < GM_GROUND_CAUTION_DIST){
     b.aiState='survive';
@@ -4807,17 +4857,21 @@ function updateBotAI_GravityMoon(b, dt){
 
   var pad = gmNearestUncollectedPad(b);
   var huntTarget = null;
-  var goalX;
+  var goalAngle;
   if(pad){
     b.aiState='collect';
-    goalX = pad.padX;
+    goalAngle = angTo(b.x, b.y, pad.padX, pad.padY-40);
   } else {
     huntTarget = gmMostCoresShip(b);
-    b.aiState = huntTarget ? 'hunt' : 'scout';
-    goalX = huntTarget ? huntTarget.x : b.x;
+    if(huntTarget){
+      b.aiState='hunt';
+      goalAngle = angTo(b.x, b.y, huntTarget.x, huntTarget.y);
+    } else {
+      b.aiState='scout';
+      goalAngle = upAngle; // nothing left to do -- just hold altitude
+    }
   }
 
-  var goalAngle = angTo(b.x, b.y, goalX, GM_GROUND_Y-40);
   var urgency = clamp(b.vy/GM_LETHAL_LANDING_SPEED, 0, 1);
   var steerAngle = goalAngle + angDiff(goalAngle, upAngle)*urgency;
 
@@ -4909,9 +4963,13 @@ function updateControlledShip(ent, input, dt, movementOnly){
   var effThrust = (ent.eff ? ent.eff.thrustPower : ent.def.thrustPower) * gmManeuverMul;
   var effMaxSpeed = ent.eff ? ent.eff.maxSpeed : ent.def.maxSpeed;
 
-  // Gravity Moon: constant downward accel, applied before thrust so
-  // thrusting nose-up within this same frame can counter it.
-  if(gameMode==='gravitymoon') ent.vy += GM_GRAVITY*(dt/16.67);
+  // Gravity Moon: downward accel eases off with cores held (as well as
+  // thrust getting stronger via gmManeuverMul above), applied before
+  // thrust so thrusting nose-up within this same frame can counter it.
+  if(gameMode==='gravitymoon'){
+    var gmGravityMul = 1 - ent.gmCoresHeld.length*GM_GRAVITY_REDUCTION_PER_CORE;
+    ent.vy += GM_GRAVITY*gmGravityMul*(dt/16.67);
+  }
 
   ent.thrusting = !!input.thrustOn;
   if(input.thrustOn){
@@ -5335,7 +5393,7 @@ function update(dt){
     updateAmmoRegen(b, dt);
     updateBurstFire(b, dt);
     updateBeamWeapon(b, dt);
-    if(gameMode==='gravitymoon') b.vy += GM_GRAVITY*(dt/16.67);
+    if(gameMode==='gravitymoon') b.vy += GM_GRAVITY*(1 - b.gmCoresHeld.length*GM_GRAVITY_REDUCTION_PER_CORE)*(dt/16.67);
     b.x += b.vx*(dt/16.67); b.y += b.vy*(dt/16.67);
     resolveObstacles(b);
     resolveAsteroids(b);
@@ -5606,43 +5664,49 @@ function drawAsteroid(a){
   ctx.restore();
 }
 
-// Gravity Moon: a rocky moon surface across the bottom of the map, with
-// each of the 6 core pads drawn on it -- lit with its color while its
-// core still waits there, dimmed once a ship is carrying it away.
+// Gravity Moon: a jagged vector-line moon surface (classic Lunar Lander
+// terrain) rendered in the game's own cyan palette, with each of the 6
+// core pads drawn as a flat tick-marked landing shelf set into it --
+// lit with its color while its core still waits there, dimmed once a
+// ship is carrying it away.
 function drawGravityMoonGround(){
+  if(gmTerrain.length<2) return;
   ctx.save();
-  ctx.fillStyle='rgba(40,32,28,0.9)';
-  ctx.strokeStyle='rgba(180,150,120,0.5)';
-  ctx.lineWidth=3;
   ctx.beginPath();
-  ctx.moveTo(0,GM_GROUND_Y);
-  ctx.lineTo(WW,GM_GROUND_Y);
-  ctx.lineTo(WW,WH);
-  ctx.lineTo(0,WH);
+  ctx.moveTo(gmTerrain[0].x, WH);
+  for(var i=0;i<gmTerrain.length;i++) ctx.lineTo(gmTerrain[i].x, gmTerrain[i].y);
+  ctx.lineTo(gmTerrain[gmTerrain.length-1].x, WH);
   ctx.closePath();
+  ctx.fillStyle='rgba(4,14,24,0.94)';
   ctx.fill();
+
   ctx.beginPath();
-  ctx.moveTo(0,GM_GROUND_Y);
-  ctx.lineTo(WW,GM_GROUND_Y);
+  ctx.moveTo(gmTerrain[0].x, gmTerrain[0].y);
+  for(var i=1;i<gmTerrain.length;i++) ctx.lineTo(gmTerrain[i].x, gmTerrain[i].y);
+  ctx.strokeStyle='#00d4ff';
+  ctx.shadowColor='#00d4ff'; ctx.shadowBlur=10;
+  ctx.lineWidth=2.5;
   ctx.stroke();
+  ctx.shadowBlur=0;
   ctx.restore();
 
   for(var i=0;i<gmCores.length;i++){
     var core=gmCores[i];
     ctx.save();
-    ctx.translate(core.padX, GM_GROUND_Y);
-    ctx.fillStyle='rgba(70,60,55,0.9)';
+    ctx.translate(core.padX, core.padY);
     ctx.strokeStyle=core.hex;
-    ctx.lineWidth=2;
-    ctx.shadowColor=core.hex; ctx.shadowBlur = core.carriedBy ? 0 : 10;
-    ctx.fillRect(-24,-6,48,10);
-    ctx.strokeRect(-24,-6,48,10);
+    ctx.shadowColor=core.hex; ctx.shadowBlur = core.carriedBy ? 0 : 8;
+    ctx.lineWidth=2.5;
+    ctx.beginPath(); ctx.moveTo(-45,0); ctx.lineTo(45,0); ctx.stroke();
+    ctx.lineWidth=1.5;
+    for(var t=-30;t<=30;t+=15){ ctx.beginPath(); ctx.moveTo(t,0); ctx.lineTo(t-6,8); ctx.stroke(); }
     if(!core.carriedBy){
+      ctx.shadowBlur=6;
       ctx.beginPath();
-      ctx.arc(0,-18,10,0,Math.PI*2);
+      ctx.arc(0,-20,10,0,Math.PI*2);
       ctx.fillStyle=core.hex;
       ctx.fill();
-      ctx.strokeStyle='rgba(255,255,255,0.7)';
+      ctx.strokeStyle='rgba(255,255,255,0.75)';
       ctx.lineWidth=1.5;
       ctx.stroke();
     }
@@ -5855,14 +5919,17 @@ function drawMinimap(){
   }
   mx.fillStyle='rgba(80,255,180,0.85)';
   mx.beginPath(); mx.arc(shieldStation.x*scaleX,shieldStation.y*scaleY,3.5,0,Math.PI*2); mx.fill();
-  if(gameMode==='gravitymoon'){
-    mx.strokeStyle='rgba(180,150,120,0.7)'; mx.lineWidth=1.5;
-    mx.beginPath(); mx.moveTo(0,GM_GROUND_Y*scaleY); mx.lineTo(mw,GM_GROUND_Y*scaleY); mx.stroke();
+  if(gameMode==='gravitymoon' && gmTerrain.length>1){
+    mx.strokeStyle='rgba(0,212,255,0.7)'; mx.lineWidth=1.5;
+    mx.beginPath();
+    mx.moveTo(gmTerrain[0].x*scaleX, gmTerrain[0].y*scaleY);
+    for(var i=1;i<gmTerrain.length;i++) mx.lineTo(gmTerrain[i].x*scaleX, gmTerrain[i].y*scaleY);
+    mx.stroke();
     for(var i=0;i<gmCores.length;i++){
       var core=gmCores[i];
       if(core.carriedBy) continue;
       mx.fillStyle=core.hex;
-      mx.beginPath(); mx.arc(core.padX*scaleX,GM_GROUND_Y*scaleY,2,0,Math.PI*2); mx.fill();
+      mx.beginPath(); mx.arc(core.padX*scaleX,core.padY*scaleY,2,0,Math.PI*2); mx.fill();
     }
   }
   for(var i=0;i<nebulaClouds.length;i++){
