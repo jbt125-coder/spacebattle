@@ -530,10 +530,39 @@ var SPACE_STATION_UPGRADE_COST=25;
 var WEEK_MS=7*24*60*60*1000;
 var progress=null;
 
-// Weekly Challenges -- all 3 are active at once. The all-ships win tally
-// and its claim are permanent (never reset once earned); the Destructo
-// and Cloak kill trackers/claims reset on a rolling 7-day cycle from
-// whenever the previous cycle started (checkWeeklyChallengeRefresh).
+// Random weekly challenges -- 3 freshly-rolled "win N times with SHIP in
+// MODE" challenges, alongside the 3 fixed ones above. Re-rolled every time
+// the weekly cycle refreshes (checkWeeklyChallengeRefresh), same cadence
+// as the Destructo/Cloak trackers. Each is independent of the fixed
+// challenges -- solo-only, any of the 3 modes, reward is a flat amount of
+// ONE randomly-chosen currency (not both, unlike the fixed challenges).
+var RANDOM_CHALLENGE_MODES=['arena','warpcore','beltblast'];
+var RANDOM_CHALLENGE_WIN_TARGET=3;
+var RANDOM_CHALLENGE_REWARD=20;
+function modeDisplayName(mode){
+  return mode==='warpcore' ? 'WARP CORE' : mode==='beltblast' ? 'BELT BLAST' : 'BATTLE ARENA';
+}
+// Rolls 3 challenges with distinct mode+ship combos (retries on a
+// collision -- trivially satisfiable, only 3 of 24 possible combos needed).
+function generateRandomChallenges(){
+  var out=[], tries=0;
+  while(out.length<3 && tries<200){
+    tries++;
+    var mode=RANDOM_CHALLENGE_MODES[rndI(0,RANDOM_CHALLENGE_MODES.length-1)];
+    var ship=SHIPS[rndI(0,SHIPS.length-1)];
+    var dup=false;
+    for(var i=0;i<out.length;i++){ if(out[i].mode===mode && out[i].shipId===ship.id){ dup=true; break; } }
+    if(dup) continue;
+    out.push({ mode:mode, shipId:ship.id, currency: Math.random()<0.5?'gems':'bucks', winCount:0, claimed:false });
+  }
+  return out;
+}
+
+// Weekly Challenges -- all 3 fixed ones are active at once, plus the 3
+// random ones above. The all-ships win tally and its claim are permanent
+// (never reset once earned); the Destructo/Cloak kill trackers/claims and
+// the random challenges all reset on a rolling 7-day cycle from whenever
+// the previous cycle started (checkWeeklyChallengeRefresh).
 function defaultChallenges(){
   var tally={};
   for(var i=0;i<SHIPS.length;i++) tally[SHIPS[i].id]=false;
@@ -544,7 +573,8 @@ function defaultChallenges(){
     destructoKillCount: 0,
     destructoClaimed: false,
     cloakKillDone: false,
-    cloakClaimed: false
+    cloakClaimed: false,
+    randomChallenges: generateRandomChallenges()
   };
 }
 function defaultProgress(){
@@ -594,6 +624,12 @@ function loadProgress(){
   if(typeof p.challenges.cloakKillDone!=='boolean') p.challenges.cloakKillDone=false;
   if(typeof p.challenges.cloakClaimed!=='boolean') p.challenges.cloakClaimed=false;
   if(typeof p.challenges.weekStart!=='number') p.challenges.weekStart=Date.now();
+  // Migration for saves from before random weekly challenges existed --
+  // roll a fresh set without touching weekStart (not a weekly reset, just
+  // filling in a field an older save never had).
+  if(!Array.isArray(p.challenges.randomChallenges) || p.challenges.randomChallenges.length!==3){
+    p.challenges.randomChallenges=generateRandomChallenges();
+  }
   if(!p.ships) p.ships={};
   // Fill in any ships missing from an older/partial save
   for(var i=0;i<SHIPS.length;i++){
@@ -605,10 +641,10 @@ function saveProgress(){
   try{ window.localStorage.setItem(SAVE_KEY, JSON.stringify(progress)); }catch(e){}
 }
 progress=loadProgress();
-// Rolling 7-day refresh for the Destructo/Cloak weekly challenges -- the
-// all-ships win tally is permanent and never touched here. Called at load
-// and again defensively wherever challenge progress is credited, in case
-// the tab's been open across a week boundary.
+// Rolling 7-day refresh for the Destructo/Cloak/random weekly challenges --
+// the all-ships win tally is permanent and never touched here. Called at
+// load and again defensively wherever challenge progress is credited, in
+// case the tab's been open across a week boundary.
 function checkWeeklyChallengeRefresh(){
   var now=Date.now();
   if(now - progress.challenges.weekStart >= WEEK_MS){
@@ -617,6 +653,7 @@ function checkWeeklyChallengeRefresh(){
     progress.challenges.destructoClaimed=false;
     progress.challenges.cloakKillDone=false;
     progress.challenges.cloakClaimed=false;
+    progress.challenges.randomChallenges=generateRandomChallenges();
     saveProgress();
   }
 }
@@ -2443,6 +2480,10 @@ function anyChallengeClaimable(){
     var s=challengeStatus(CHALLENGE_DEFS[i].id);
     if(s.complete && !s.claimed) return true;
   }
+  var rcs=progress.challenges.randomChallenges;
+  for(var j=0;j<rcs.length;j++){
+    if(rcs[j].winCount>=RANDOM_CHALLENGE_WIN_TARGET && !rcs[j].claimed) return true;
+  }
   return false;
 }
 function updateClaimRewardsDot(){
@@ -2483,6 +2524,26 @@ function refreshChallengesModal(){
       wrap.appendChild(card);
     })(CHALLENGE_DEFS[i]);
   }
+  var rcs=progress.challenges.randomChallenges;
+  for(var ri=0;ri<rcs.length;ri++){
+    (function(rc, idx){
+      var shipDef=SHIPS.filter(function(s){ return s.id===rc.shipId; })[0];
+      var shipName=shipDef?shipDef.name:rc.shipId;
+      var modeName=modeDisplayName(rc.mode);
+      var complete=rc.winCount>=RANDOM_CHALLENGE_WIN_TARGET;
+      var rewardText = rc.currency==='gems' ? (RANDOM_CHALLENGE_REWARD+' GEMS') : ('$'+RANDOM_CHALLENGE_REWARD);
+      var card=document.createElement('div');
+      card.className='challengeCard';
+      var html='<div class="challengeTop"><span>'+shipName+' -- '+modeName+'</span><span class="challengeReward">'+rewardText+'</span></div>';
+      html+='<div class="challengeDesc">Win '+RANDOM_CHALLENGE_WIN_TARGET+' times in '+modeName+' with '+shipName+'.</div>';
+      html+='<div class="challengeProgress">'+rc.winCount+'/'+RANDOM_CHALLENGE_WIN_TARGET+' wins</div>';
+      var btnLabel = rc.claimed ? 'CLAIMED' : (complete ? 'CLAIM REWARD' : 'IN PROGRESS');
+      html+='<button class="challengeClaimBtn'+(rc.claimed?' claimed':'')+'" '+((!complete||rc.claimed)?'disabled':'')+'>'+btnLabel+'</button>';
+      card.innerHTML=html;
+      card.querySelector('.challengeClaimBtn').addEventListener('click', function(){ claimRandomChallenge(idx); });
+      wrap.appendChild(card);
+    })(rcs[ri], ri);
+  }
   updateClaimRewardsDot();
 }
 function claimChallenge(id){
@@ -2496,6 +2557,19 @@ function claimChallenge(id){
   else if(id==='cloak') progress.challenges.cloakClaimed=true;
   saveProgress();
   showAlert(def.name+' CLAIMED -- +'+def.gems+' GEMS, +$'+def.bucks, 2600);
+  refreshChallengesModal();
+  updateGemBankDisplay();
+  updateBucksBankDisplay();
+}
+function claimRandomChallenge(idx){
+  var rc=progress.challenges.randomChallenges[idx];
+  if(!rc || rc.claimed || rc.winCount<RANDOM_CHALLENGE_WIN_TARGET) return;
+  rc.claimed=true;
+  var rewardText;
+  if(rc.currency==='gems'){ progress.bank += RANDOM_CHALLENGE_REWARD; rewardText='+'+RANDOM_CHALLENGE_REWARD+' GEMS'; }
+  else { progress.galacticBucks += RANDOM_CHALLENGE_REWARD; rewardText='+$'+RANDOM_CHALLENGE_REWARD; }
+  saveProgress();
+  showAlert('CHALLENGE CLAIMED -- '+rewardText, 2600);
   refreshChallengesModal();
   updateGemBankDisplay();
   updateBucksBankDisplay();
@@ -3818,6 +3892,20 @@ function endGame(won, reason, customTitle, customSub){
       progress.challenges.allShipsWinTally[selectedShip.id]=true;
       saveProgress();
     }
+  }
+
+  if(won && !netRole){ // Random weekly challenges: solo-only, any of the 3 modes, matched by mode+ship
+    checkWeeklyChallengeRefresh();
+    var rcs=progress.challenges.randomChallenges;
+    var rcChanged=false;
+    for(var ri=0;ri<rcs.length;ri++){
+      var rc=rcs[ri];
+      if(!rc.claimed && rc.winCount<RANDOM_CHALLENGE_WIN_TARGET && rc.mode===gameMode && rc.shipId===selectedShip.id){
+        rc.winCount++;
+        rcChanged=true;
+      }
+    }
+    if(rcChanged) saveProgress();
   }
 
   if(netRole==='host'){
