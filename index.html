@@ -2421,7 +2421,7 @@ document.getElementById('clearPendingUpgradeBtn').addEventListener('click',funct
    claims reset on a rolling 7-day cycle (checkWeeklyChallengeRefresh).
 ===================================================================== */
 var CHALLENGE_DEFS=[
-  {id:'allShips', name:'FLEET MASTERY', desc:'Win a battle with every ship in the fleet (Arena or Warp Core).', gems:25, bucks:25},
+  {id:'allShips', name:'FLEET MASTERY', desc:'Win a Battle Arena match with every ship in the fleet.', gems:25, bucks:25},
   {id:'destructo', name:'DESTRUCTO HUNTER', desc:'Destroy 3 ships with the Destructo Missile.', gems:15, bucks:15},
   {id:'cloak', name:'GHOST KILL', desc:'Destroy a ship while cloaked.', gems:15, bucks:15}
 ];
@@ -3812,7 +3812,7 @@ function endGame(won, reason, customTitle, customSub){
   }
   document.getElementById('gameOverScreen').classList.remove('hidden');
 
-  if(won && !netRole){ // Weekly Challenge: track wins per-ship, solo-only
+  if(won && !netRole && gameMode==='arena'){ // Weekly Challenge: track wins per-ship, solo-only, Battle Arena only
     checkWeeklyChallengeRefresh();
     if(!progress.challenges.allShipsWinTally[selectedShip.id]){
       progress.challenges.allShipsWinTally[selectedShip.id]=true;
