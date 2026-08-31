@@ -466,9 +466,9 @@ var SHIPS = [
     hp:95, turnRate:0.075, thrustPower:0.26, maxSpeed:8.6, drag:0.985,
     fireRate:230, bulletSpeed:10.5, bulletDamage:7, bulletLife:1800,
     burstCount:6, burstDelay:70, // each trigger pull fires 6 in a line for the cost of 1 shot
-    comboDamage:true, // landing consecutive hits on the SAME target within one burst ramps damage up to 8x (resets every trigger pull)
+    comboDamage:true, // landing consecutive hits on the SAME target within one burst ramps damage linearly, 1x/2x/3x/4x/5x/6x (resets every trigger pull)
     ability:{name:'PHASE BLINK', icon:'>>', cooldown:8500, duration:1, desc:'Blinks beside the nearest enemy, stunning it for 1.5s and unloading a point-blank burst.'},
-    desc:'Fragile but relentless. Every trigger pull rattles off a line of six rounds for the cost of one shot -- landing hits back-to-back on the same target ramps that burst\'s damage up to 8x. Phase Blink teleports Wraith right beside the nearest enemy, freezing it in place for 1.5 seconds and firing a full burst point-blank.'
+    desc:'Fragile but relentless. Every trigger pull rattles off a line of six rounds for the cost of one shot -- landing hits back-to-back on the same target ramps each successive round\'s damage (7/14/21/28/35/42). Phase Blink teleports Wraith right beside the nearest enemy, freezing it in place for 1.5 seconds and firing a full burst point-blank.'
   },
   {
     id:'longshot', name:'LONGSHOT', role:'Sniper', color:'#ffb020', rgb:'255,176,32',
@@ -4746,10 +4746,13 @@ function updateBullets(dt){
               if(burstTrackerHit){
                 // Wraith-style burst: ramp is keyed per TARGET within this
                 // one trigger pull (see beginFire's fresh {hits:[]} tracker).
+                // Linear, uncapped across the burst: 1x/2x/3x/4x/5x/6x (i.e.
+                // 7/14/21/28/35/42 at the base 7 damage) rather than the
+                // doubling curve used elsewhere in the game.
                 var hitEntry=null;
                 for(var hi=0; hi<bl.comboTracker.hits.length; hi++){ if(bl.comboTracker.hits[hi].target===tgt){ hitEntry=bl.comboTracker.hits[hi]; break; } }
                 var targetStreak = hitEntry ? hitEntry.count : 0;
-                dmgMult = Math.pow(2, Math.min(targetStreak,3)); // 1x/2x/4x/8x, capped
+                dmgMult = targetStreak+1; // 1x, 2x, 3x, ...
                 if(hitEntry) hitEntry.count++; else bl.comboTracker.hits.push({target:tgt, count:1});
               } else {
                 dmgMult = Math.pow(2, Math.min(bl.comboTracker.comboStreak,3)); // 1x/2x/4x/8x, capped
