@@ -28,6 +28,8 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 .hud-val.warn{color:#ff4444;text-shadow:0 0 12px rgba(255,68,68,0.6);}
 .gmCoreDot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;border:1px solid rgba(255,255,255,0.3);opacity:0.25;}
 .gmCoreDot.held{opacity:1;box-shadow:0 0 6px currentColor;}
+.gmCoreDot.cooling{animation:gmCoolPulse 1s ease-in-out infinite;}
+@keyframes gmCoolPulse{0%,100%{opacity:0.15;}50%{opacity:0.55;}}
 #shieldBar{width:120px;height:8px;background:rgba(0,212,255,0.15);border-radius:4px;border:1px solid rgba(0,212,255,0.3);overflow:hidden;margin-top:3px;}
 #shieldFill{height:100%;background:#00d4ff;border-radius:4px;transition:width 0.2s,background 0.3s;}
 #shieldFill.teamB{background:#ff4444;}
@@ -838,9 +840,14 @@ function resolveObstacles(ent){
 // path, so a Perma-Shield bonus pool absorbs it first), gated by the same
 // brief post-hit invincibility window bullets use so a ship wedged
 // against an asteroid isn't shredded every single frame.
-function resolveAsteroids(ent){
-  for(var i=0;i<asteroids.length;i++){
-    var a=asteroids[i];
+// Shared by resolveAsteroids for both Belt Blast's `asteroids` and Gravity
+// Moon's `gmAsteroids` -- identical push-apart + contact-damage rules,
+// just a different death path per mode (Gravity Moon needs to return any
+// held cores to their pads, which the generic dropCarriedCores/respawn
+// path below doesn't know about).
+function resolveAsteroidCollision(ent, list){
+  for(var i=0;i<list.length;i++){
+    var a=list[i];
     var dx=ent.x-a.x, dy=ent.y-a.y;
     var d=Math.sqrt(dx*dx+dy*dy) || 0.01;
     var push=(ent.r+a.r)-d;
@@ -853,15 +860,23 @@ function resolveAsteroids(ent){
         sfxHit();
         ent.invincible = 250;
         if(ent.hp<=0 && ent.alive){
-          ent.alive=false;
-          spawnBurst(ent.x,ent.y,ent.def.color,28);
-          sfxShipExplosion();
-          dropCarriedCores(ent);
-          if(!ent.isPlayer) ent.respawnTimer=rnd(3000,5000);
+          if(gameMode==='gravitymoon'){
+            destroyGravityMoonShip(ent);
+          } else {
+            ent.alive=false;
+            spawnBurst(ent.x,ent.y,ent.def.color,28);
+            sfxShipExplosion();
+            dropCarriedCores(ent);
+            if(!ent.isPlayer) ent.respawnTimer=rnd(3000,5000);
+          }
         }
       }
     }
   }
+}
+function resolveAsteroids(ent){
+  resolveAsteroidCollision(ent, asteroids);
+  resolveAsteroidCollision(ent, gmAsteroids);
 }
 
 /* =====================================================================
@@ -886,7 +901,9 @@ var GM_PAD_COLORS = [
   {id:'red', hex:'#ff4444'}, {id:'yellow', hex:'#ffee00'}, {id:'purple', hex:'#aa55ff'},
   {id:'green', hex:'#44ff88'}, {id:'blue', hex:'#3399ff'}, {id:'orange', hex:'#ff9922'}
 ];
-var gmCores=[]; // [{id,hex,padX,padY,carriedBy}, ...] -- always 6, one per color, fixed pad set into the jagged terrain
+var GM_CORE_COOLDOWN_MS = 15000; // how long a pad cools down after its core is taken before a fresh one appears
+var gmPads=[]; // [{id,hex,padX,padY,cooldownTimer}, ...] -- always 6, one per color, fixed location set into the jagged terrain
+var gmCores=[]; // [{id,hex,padX,padY}, ...] -- core instances currently sitting on their pad, uncollected; removed on pickup (moves into gmCoresHeld) and re-added when that pad's cooldown expires -- can briefly hold a duplicate color if a pad regenerates while its original is still being carried
 
 // Jagged moon-surface terrain, classic-Lunar-Lander style: a polyline of
 // {x,y} points spanning the width, with a flat shelf carved in wherever a
@@ -910,6 +927,8 @@ function gmTerrainHeightAt(x){
   return gmTerrain.length ? gmTerrain[gmTerrain.length-1].y : GM_TERRAIN_MAX_Y;
 }
 
+// Also fully restocks gmCores once every pad's height is known (a pad's
+// padY isn't settled until the terrain around it is generated).
 function generateGravityMoonTerrain(){
   gmTerrain=[];
   var stepX=WW/(GM_TERRAIN_SEGMENTS-1);
@@ -920,28 +939,140 @@ function generateGravityMoonTerrain(){
   }
   // Sample each pad's natural height from the raw jagged terrain BEFORE
   // carving any shelves, so one pad's shelf never skews another's height.
-  for(var p=0;p<gmCores.length;p++) gmCores[p].padY = gmTerrainHeightAt(gmCores[p].padX);
+  for(var p=0;p<gmPads.length;p++) gmPads[p].padY = gmTerrainHeightAt(gmPads[p].padX);
   // Carve an exact flat shelf under each pad: drop any grid points that
   // fall inside it and insert two endpoints at the pad's height, so the
   // whole span interpolates dead level no matter how the random-walk grid
   // points happened to fall relative to this pad's x.
-  for(var p=0;p<gmCores.length;p++){
-    var padX=gmCores[p].padX, padY=gmCores[p].padY;
+  for(var p=0;p<gmPads.length;p++){
+    var padX=gmPads[p].padX, padY=gmPads[p].padY;
     gmTerrain = gmTerrain.filter(function(pt){ return Math.abs(pt.x-padX) >= GM_PAD_FLAT_HALF_WIDTH; });
     gmTerrain.push({x:padX-GM_PAD_FLAT_HALF_WIDTH, y:padY});
     gmTerrain.push({x:padX+GM_PAD_FLAT_HALF_WIDTH, y:padY});
   }
   gmTerrain.sort(function(a,b){ return a.x-b.x; });
+  gmCores=[];
+  for(var p=0;p<gmPads.length;p++) gmCores.push({id:gmPads[p].id, hex:gmPads[p].hex, padX:gmPads[p].padX, padY:gmPads[p].padY});
 }
 
-// Spreads the 6 colored cores evenly across the width, each parked at its
-// own pad until a ship lands on it. padY is filled in afterward by
-// generateGravityMoonTerrain once the terrain height at that x is known.
-function placeGravityMoonCores(){
-  gmCores=[];
+// Spreads the 6 colored pads evenly across the width. padY and the initial
+// gmCores stock are filled in afterward by generateGravityMoonTerrain once
+// the terrain height at each pad's x is known.
+function placeGravityMoonPads(){
+  gmPads=[];
   for(var i=0;i<GM_PAD_COLORS.length;i++){
     var frac = 0.12 + (0.76/(GM_PAD_COLORS.length-1))*i;
-    gmCores.push({id:GM_PAD_COLORS[i].id, hex:GM_PAD_COLORS[i].hex, padX:WW*frac, padY:0, carriedBy:null});
+    gmPads.push({id:GM_PAD_COLORS[i].id, hex:GM_PAD_COLORS[i].hex, padX:WW*frac, padY:0, cooldownTimer:0});
+  }
+}
+
+function gmPadFor(id){
+  for(var i=0;i<gmPads.length;i++) if(gmPads[i].id===id) return gmPads[i];
+  return null;
+}
+
+// Cores-based flight ceiling: brutal at 0 cores (can't fly far above the
+// terrain), eases toward near the top of the map as more are held -- a
+// hard clamp, same style as the map's own edge clamp in resolveObstacles,
+// no bot-AI awareness needed (they already don't need special logic to
+// stop at the world edges either).
+var GM_CEILING_Y_AT_0_CORES = 900;  // min y (highest reachable) at 0 cores held
+var GM_CEILING_Y_AT_MAX_CORES = 60; // min y at all 6 cores held -- almost the full map height
+function gmCeilingYFor(ent){
+  var frac = ent.gmCoresHeld.length/6;
+  return GM_CEILING_Y_AT_0_CORES - (GM_CEILING_Y_AT_0_CORES-GM_CEILING_Y_AT_MAX_CORES)*frac;
+}
+
+// Returns every core a ship was holding to its own pad (unless a regenerated
+// copy already beat it back there) and makes that pad instantly available
+// again -- used on any Gravity Moon death, matching the "return to spawn"
+// rule (no extra cooldown wait for a core that was already lost).
+function gmReturnCoresToPads(ent){
+  for(var i=0;i<ent.gmCoresHeld.length;i++){
+    var core=ent.gmCoresHeld[i];
+    var onPad=false;
+    for(var j=0;j<gmCores.length;j++){ if(gmCores[j].id===core.id){ onPad=true; break; } }
+    if(!onPad) gmCores.push(core);
+    var pad=gmPadFor(core.id);
+    if(pad) pad.cooldownTimer=0;
+  }
+  ent.gmCoresHeld=[];
+}
+
+// Ticks every pad's regen cooldown; once it crosses 0, restocks gmCores with
+// a fresh instance of that color if one isn't already sitting there (e.g.
+// the original already returned on death in the meantime).
+function updateGravityMoonPads(dt){
+  for(var i=0;i<gmPads.length;i++){
+    var pad=gmPads[i];
+    if(pad.cooldownTimer>0){
+      pad.cooldownTimer -= dt;
+      if(pad.cooldownTimer<=0){
+        pad.cooldownTimer=0;
+        var stocked=false;
+        for(var j=0;j<gmCores.length;j++){ if(gmCores[j].id===pad.id){ stocked=true; break; } }
+        if(!stocked) gmCores.push({id:pad.id, hex:pad.hex, padX:pad.padX, padY:pad.padY});
+      }
+    }
+  }
+}
+
+/* =====================================================================
+   GRAVITY MOON: FALLING ASTEROID HAZARDS
+   Every core taken drifts one asteroid in from the top of the map. They
+   fall at a slow constant drift (not affected by GM_GRAVITY -- they're
+   inert rocks, not ships), deal physical contact damage like Belt Blast's
+   asteroids (see resolveAsteroidCollision), and fragment large -> 2
+   medium -> 2 small on a weapon hit -- same cascade and size/damage
+   constants as Belt Blast (BELT_SIZE_R/BELT_COLLISION_DAMAGE), just
+   without team-based recoloring since this is a teamless FFA. Reaching
+   the terrain explodes the asteroid and replaces it with two fresh ones
+   from the top: shooting one down all the way reduces the hazard count,
+   letting one crash escalates it. A population cap keeps a long no-timer
+   match from accumulating rocks forever.
+===================================================================== */
+var GM_ASTEROID_CAP = 20;
+var gmAsteroids=[]; // [{x,y,vx,vy,size,r,color:'neutral',jag,spin,spinBase}, ...] -- same shape as Belt Blast's `asteroids` so drawAsteroid can render both unmodified
+
+function makeGravityMoonAsteroid(x,y,size){
+  var jag=[]; for(var j=0;j<9;j++) jag.push(rnd(0.78,1.15));
+  return {x:x, y:y, vx:rnd(-0.3,0.3), vy:rnd(1.0,1.8), size:size, r:BELT_SIZE_R[size], color:'neutral', jag:jag, spin:rnd(-0.0006,0.0006), spinBase:rnd(0,Math.PI*2)};
+}
+function spawnGravityMoonAsteroidFromTop(){
+  if(gmAsteroids.length>=GM_ASTEROID_CAP) return;
+  gmAsteroids.push(makeGravityMoonAsteroid(rnd(100,WW-100), -40, 'large'));
+}
+function spawnGravityMoonAsteroidFragment(x,y,size){
+  if(gmAsteroids.length>=GM_ASTEROID_CAP) return;
+  gmAsteroids.push(makeGravityMoonAsteroid(x,y,size));
+}
+// Weapon hit: large -> 2 medium -> 2 small, matching breakAsteroid's cascade.
+// The smallest size is destroyed outright with NO replacement -- shooting
+// one down all the way is how a player actively reduces the hazard count.
+function breakGravityMoonAsteroid(ast){
+  var idx=gmAsteroids.indexOf(ast);
+  if(idx===-1) return;
+  gmAsteroids.splice(idx,1);
+  spawnBurst(ast.x, ast.y, '#c98a4b', 10);
+  if(ast.size==='large'){
+    spawnGravityMoonAsteroidFragment(ast.x-8, ast.y-8, 'medium');
+    spawnGravityMoonAsteroidFragment(ast.x+8, ast.y+8, 'medium');
+  } else if(ast.size==='medium'){
+    spawnGravityMoonAsteroidFragment(ast.x-6, ast.y-6, 'small');
+    spawnGravityMoonAsteroidFragment(ast.x+6, ast.y+6, 'small');
+  }
+}
+function updateGravityMoonAsteroids(dt){
+  for(var i=gmAsteroids.length-1;i>=0;i--){
+    var a=gmAsteroids[i];
+    a.x += a.vx*(dt/16.67); a.y += a.vy*(dt/16.67);
+    if(a.y+a.r >= gmTerrainHeightAt(a.x)){
+      gmAsteroids.splice(i,1);
+      spawnBurst(a.x, a.y, '#c98a4b', 16);
+      sfxShipExplosion();
+      spawnGravityMoonAsteroidFromTop();
+      spawnGravityMoonAsteroidFromTop();
+    }
   }
 }
 
@@ -963,11 +1094,16 @@ function resolveGravityMoonGround(ent){
     ent.gmLanded = true;
     for(var i=0;i<gmCores.length;i++){
       var core=gmCores[i];
-      if(!core.carriedBy && Math.abs(ent.x-core.padX) < GM_PAD_PICKUP_RADIUS){
-        core.carriedBy=ent;
-        ent.gmCoresHeld.push(core);
-        if(ent===player) showAlert(core.id.toUpperCase()+' CORE COLLECTED', 1800);
-      }
+      if(Math.abs(ent.x-core.padX) >= GM_PAD_PICKUP_RADIUS) continue;
+      var alreadyHeld=false;
+      for(var h=0;h<ent.gmCoresHeld.length;h++){ if(ent.gmCoresHeld[h].id===core.id){ alreadyHeld=true; break; } }
+      if(alreadyHeld) continue; // one of each color max -- leave it for someone else
+      gmCores.splice(i,1); i--;
+      ent.gmCoresHeld.push(core);
+      var pad=gmPadFor(core.id);
+      if(pad) pad.cooldownTimer=GM_CORE_COOLDOWN_MS;
+      spawnGravityMoonAsteroidFromTop();
+      if(ent===player) showAlert(core.id.toUpperCase()+' CORE COLLECTED', 1800);
     }
   } else if(impactSpeed <= GM_LETHAL_LANDING_SPEED){
     if(ent.alive && ent.invincible<=0){
@@ -989,8 +1125,7 @@ function destroyGravityMoonShip(ent){
   ent.alive=false;
   spawnBurst(ent.x,ent.y,ent.def.color,28);
   sfxShipExplosion();
-  for(var i=0;i<ent.gmCoresHeld.length;i++) ent.gmCoresHeld[i].carriedBy=null;
-  ent.gmCoresHeld=[];
+  gmReturnCoresToPads(ent);
   if(!ent.isPlayer) ent.respawnTimer=rnd(3000,5000);
 }
 
@@ -1520,6 +1655,18 @@ function updateGasClouds(dt){
         var angA=angTo(c.x,c.y,ast3.x,ast3.y);
         if(Math.abs(angDiff(c.angle,angA))>c.coneAngle/2) continue;
         breakAsteroid(ast3, c.owner.team);
+        sfxHit();
+      }
+    } else if(doTick && gameMode==='gravitymoon' && c.owner){
+      var gmAstSnapshot3=gmAsteroids.slice();
+      for(var ak=0;ak<gmAstSnapshot3.length;ak++){
+        var gast3=gmAstSnapshot3[ak];
+        if(gmAsteroids.indexOf(gast3)===-1) continue;
+        var gdA=dst(c.x,c.y,gast3.x,gast3.y);
+        if(gdA>c.range) continue;
+        var gangA=angTo(c.x,c.y,gast3.x,gast3.y);
+        if(Math.abs(angDiff(c.angle,gangA))>c.coneAngle/2) continue;
+        breakGravityMoonAsteroid(gast3);
         sfxHit();
       }
     }
@@ -2796,7 +2943,7 @@ function getInstructionsContent(mode){
   if(mode==='gravitymoon'){
     return {
       title: 'GRAVITY MOON',
-      goal: 'A 3-way free-for-all against constant gravity. Point your nose away from the surface and thrust to resist it -- turning to fight stops your climb, and landing too hard destroys you. Land safely on one of 6 colored pads to claim its warp core; the more cores you hold, the better your ship maneuvers. Collect all 6 to win -- destroying a rival returns any cores they were carrying to their pads.',
+      goal: 'A 3-way free-for-all against constant gravity. Point your nose away from the surface and thrust to resist it -- turning to fight stops your climb, and landing too hard destroys you. Land safely on one of 6 colored pads to claim its warp core (one of each color max -- a pad regenerates a fresh core about 15s after being taken); the more cores you hold, the better your ship maneuvers and the higher you can fly. Collect all 6 to win -- destroying a rival returns any cores they were carrying to their pads. Every core taken drops a hazard asteroid in from orbit: shoot one down to break it apart and clear it, or let it crash into the surface and it explodes into two more.',
       rewards: 'Win a Gravity Moon match and you earn $'+GALACTIC_BUCKS_PER_WIN+' Galactic Bucks -- a currency separate from your gem chest.',
       rewardsUse: 'Spend Galactic Bucks ($'+SPACE_STATION_UPGRADE_COST+' each) at the Space Station in the hangar on powerful one-battle upgrades for your next match: Destructo Missile, Extra Perma-Shield, Cloak, or a Deputy Drone.'
     };
@@ -3143,6 +3290,15 @@ function updateBeamWeapon(ent, dt){
       if(asteroids.indexOf(ast2)===-1) continue;
       if(distPointToSegment(ast2.x,ast2.y, ent.x,ent.y, ex,ey) > ast2.r+6) continue;
       breakAsteroid(ast2, ent.team);
+      sfxHit();
+    }
+  } else if(gameMode==='gravitymoon'){
+    var gmAstSnapshot2=gmAsteroids.slice();
+    for(var aj=0;aj<gmAstSnapshot2.length;aj++){
+      var gast2=gmAstSnapshot2[aj];
+      if(gmAsteroids.indexOf(gast2)===-1) continue;
+      if(distPointToSegment(gast2.x,gast2.y, ent.x,ent.y, ex,ey) > gast2.r+6) continue;
+      breakGravityMoonAsteroid(gast2);
       sfxHit();
     }
   }
@@ -3737,7 +3893,7 @@ function startGuestMatch(msg){
   bullets=[]; particles=[]; gems=[]; bots=[]; turrets=[]; gasClouds=[];
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
   asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
-  gmCores=[]; // clear any leftover Gravity Moon match state (pads/cores are drawn unconditionally)
+  gmCores=[]; gmAsteroids=[]; // clear any leftover Gravity Moon match state (pads/cores/asteroids are drawn unconditionally, and asteroids would physically collide with ships if left over)
 
   player=makeShipEntity(selectedShip, WW/2, WH/2, true);
   player.eff=effectiveStatsFromLevels(selectedShip, getShipProgress(selectedShip.id));
@@ -3862,7 +4018,7 @@ function startGame(){
   bots=[]; bullets=[]; particles=[]; gems=[]; turrets=[]; gasClouds=[]; killCount=0;
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
   asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
-  gmCores=[]; // clear any leftover Gravity Moon match state (pads/cores are drawn unconditionally)
+  gmCores=[]; gmAsteroids=[]; // clear any leftover Gravity Moon match state (pads/cores/asteroids are drawn unconditionally, and asteroids would physically collide with ships if left over)
   gemsCollectedThisMatch=0;
   remotePlayer=null;
   if(!netRole) applyPendingUpgrade(player); // Space Station upgrades are solo-only (after array resets so a spawned Deputy Drone survives)
@@ -3915,7 +4071,7 @@ function startWarpCoreGame(){
   placeNebulaClouds();
   placeWarpCores();
   asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
-  gmCores=[]; // clear any leftover Gravity Moon match state (pads/cores are drawn unconditionally)
+  gmCores=[]; gmAsteroids=[]; // clear any leftover Gravity Moon match state (pads/cores/asteroids are drawn unconditionally, and asteroids would physically collide with ships if left over)
 
   var pSpawn=teamSpawnPoint('A');
   player=makeShipEntity(selectedShip, pSpawn.x, pSpawn.y, true);
@@ -3975,7 +4131,7 @@ function startBeltBlastGame(){
   placeNebulaClouds();
   placeAsteroids();
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
-  gmCores=[]; // clear any leftover Gravity Moon match state (pads/cores are drawn unconditionally)
+  gmCores=[]; gmAsteroids=[]; // clear any leftover Gravity Moon match state (pads/cores/asteroids are drawn unconditionally, and asteroids would physically collide with ships if left over)
 
   var pSpawn=teamSpawnPoint('A');
   player=makeShipEntity(selectedShip, pSpawn.x, pSpawn.y, true);
@@ -4030,8 +4186,9 @@ function startGravityMoonGame(){
   obstacles=[]; // no rectangular obstacles in this mode -- just the terrain
   placeShieldStation();
   shieldStation.y = Math.min(shieldStation.y, GM_TERRAIN_MIN_Y-100); // keep it clear of even the tallest terrain peak
-  placeGravityMoonCores();
+  placeGravityMoonPads();
   generateGravityMoonTerrain();
+  gmAsteroids=[]; // fresh match -- no leftover hazards
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
   asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
 
@@ -4256,9 +4413,12 @@ function updateHUD(){
   if(isGravityMoon){
     document.getElementById('gmCoresVal').textContent = player.gmCoresHeld.length+'/6';
     var dotsHtml='';
-    for(var gi=0;gi<gmCores.length;gi++){
-      var heldByPlayer = gmCores[gi].carriedBy===player;
-      dotsHtml += '<span class="gmCoreDot'+(heldByPlayer?' held':'')+'" style="background:'+gmCores[gi].hex+';color:'+gmCores[gi].hex+';"></span>';
+    for(var gi=0;gi<gmPads.length;gi++){
+      var pad=gmPads[gi];
+      var held=false;
+      for(var hh=0;hh<player.gmCoresHeld.length;hh++){ if(player.gmCoresHeld[hh].id===pad.id){ held=true; break; } }
+      var cls = held ? ' held' : (pad.cooldownTimer>0 ? ' cooling' : '');
+      dotsHtml += '<span class="gmCoreDot'+cls+'" style="background:'+pad.hex+';color:'+pad.hex+';"></span>';
     }
     document.getElementById('gmCoreDots').innerHTML = dotsHtml;
   }
@@ -4799,7 +4959,9 @@ function gmNearestUncollectedPad(b){
   var best=null, bestD=Infinity;
   for(var i=0;i<gmCores.length;i++){
     var core=gmCores[i];
-    if(core.carriedBy) continue;
+    var alreadyHeld=false;
+    for(var h=0;h<b.gmCoresHeld.length;h++){ if(b.gmCoresHeld[h].id===core.id){ alreadyHeld=true; break; } }
+    if(alreadyHeld) continue; // already holds this color -- don't waste time re-chasing a duplicate
     var d=Math.abs(b.x-core.padX);
     if(d<bestD){ bestD=d; best=core; }
   }
@@ -4989,7 +5151,10 @@ function updateControlledShip(ent, input, dt, movementOnly){
   ent.y += ent.vy*(dt/16.67);
   resolveObstacles(ent);
   resolveAsteroids(ent);
-  if(gameMode==='gravitymoon') resolveGravityMoonGround(ent);
+  if(gameMode==='gravitymoon'){
+    resolveGravityMoonGround(ent);
+    ent.y = Math.max(ent.y, gmCeilingYFor(ent));
+  }
 
   ent.trail.push({x:ent.x,y:ent.y});
   if(ent.trail.length>20) ent.trail.shift();
@@ -5239,6 +5404,18 @@ function updateBullets(dt){
           break;
         }
       }
+    } else if(!removed && gameMode==='gravitymoon' && bl.owner){
+      var gmAstSnapshot=gmAsteroids.slice();
+      for(var ai=0;ai<gmAstSnapshot.length;ai++){
+        var gast=gmAstSnapshot[ai];
+        if(gmAsteroids.indexOf(gast)===-1) continue;
+        if(dst(bl.x,bl.y,gast.x,gast.y) < gast.r+bl.size){
+          breakGravityMoonAsteroid(gast);
+          sfxHit();
+          if(!bl.piercing) removed=true;
+          break;
+        }
+      }
     }
 
     if(bl.life<=0 || bl.x<0||bl.x>WW||bl.y<0||bl.y>WH) removed=true;
@@ -5397,7 +5574,10 @@ function update(dt){
     b.x += b.vx*(dt/16.67); b.y += b.vy*(dt/16.67);
     resolveObstacles(b);
     resolveAsteroids(b);
-    if(gameMode==='gravitymoon') resolveGravityMoonGround(b);
+    if(gameMode==='gravitymoon'){
+      resolveGravityMoonGround(b);
+      b.y = Math.max(b.y, gmCeilingYFor(b));
+    }
     b.trail.push({x:b.x,y:b.y});
     if(b.trail.length>16) b.trail.shift();
   }
@@ -5407,6 +5587,7 @@ function update(dt){
   updateGems(dt);
   if(gameMode==='warpcore') updateWarpCores(dt);
   if(gameMode==='beltblast') updateAsteroids(dt);
+  if(gameMode==='gravitymoon'){ updateGravityMoonPads(dt); updateGravityMoonAsteroids(dt); }
   updateShieldStation(dt);
   updateTractorPull(dt);
   updateIdleRegen(dt);
@@ -5735,6 +5916,7 @@ function drawWorld(){
 
   for(var i=0;i<obstacles.length;i++) drawObstacle(obstacles[i]);
   for(var i=0;i<asteroids.length;i++) drawAsteroid(asteroids[i]);
+  for(var i=0;i<gmAsteroids.length;i++) drawAsteroid(gmAsteroids[i]);
 
   drawShieldStation();
   for(var i=0;i<nebulaClouds.length;i++) drawNebulaCloud(nebulaClouds[i]);
@@ -5927,9 +6109,13 @@ function drawMinimap(){
     mx.stroke();
     for(var i=0;i<gmCores.length;i++){
       var core=gmCores[i];
-      if(core.carriedBy) continue;
       mx.fillStyle=core.hex;
       mx.beginPath(); mx.arc(core.padX*scaleX,core.padY*scaleY,2,0,Math.PI*2); mx.fill();
+    }
+    for(var i=0;i<gmAsteroids.length;i++){
+      var ga=gmAsteroids[i];
+      mx.fillStyle='rgba(190,130,70,0.85)';
+      mx.beginPath(); mx.arc(ga.x*scaleX,ga.y*scaleY,Math.max(1,ga.r*scaleX),0,Math.PI*2); mx.fill();
     }
   }
   for(var i=0;i<nebulaClouds.length;i++){
