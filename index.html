@@ -945,41 +945,26 @@ function gmCeilingYFor(ent){
   var frac = ent.gmCoresHeld.length/6;
   return GM_CEILING_Y_AT_0_CORES - (GM_CEILING_Y_AT_0_CORES-GM_CEILING_Y_AT_MAX_CORES)*frac;
 }
+// Holding all 6 cores doesn't win outright -- a ship still has to fly up
+// and cross this altitude to actually escape the moon's gravity. Only
+// reachable with 6 cores held in the first place, since the ceiling
+// clamp keeps everyone else well below it.
+var GM_ESCAPE_Y = 90;
 
-// The color of the next core that should be produced, or null if all 6
-// are already accounted for somewhere (floating in gmCores, or held by
-// some living ship) -- since at most one live instance of a color exists
-// at a time, this is what keeps "collect all 6" meaningful no matter how
-// many times a spawn is triggered.
-function gmNextMissingColorId(){
-  var all=allShips();
-  for(var c=0;c<GM_PAD_COLORS.length;c++){
-    var id=GM_PAD_COLORS[c].id;
-    var live=false;
-    for(var i=0;i<gmCores.length;i++){ if(gmCores[i].id===id){ live=true; break; } }
-    if(!live){
-      for(var s=0;s<all.length && !live;s++){
-        for(var h=0;h<all[s].gmCoresHeld.length;h++){ if(all[s].gmCoresHeld[h].id===id){ live=true; break; } }
-      }
-    }
-    if(!live) return GM_PAD_COLORS[c];
-  }
-  return null;
-}
-// Drops a new core of whatever color is still missing at the given spot
-// (a destroyed asteroid or a ship's death site) -- a no-op once all 6
-// colors are already in play somewhere.
+// Drops a new core of a uniformly random color at the given spot (a
+// destroyed small asteroid or a ship's death site) -- duplicates of a
+// color already in play are allowed; the one-per-color rule is enforced
+// at pickup time instead (see updateGravityMoonCorePickup).
 function gmSpawnCoreAt(x,y){
-  var colorDef = gmNextMissingColorId();
-  if(!colorDef) return;
+  var colorDef = GM_PAD_COLORS[rndI(0,GM_PAD_COLORS.length-1)];
   gmCores.push({id:colorDef.id, hex:colorDef.hex, x:x, y:y});
   spawnBurst(x, y, colorDef.hex, 12);
 }
 
 // Open-air proximity pickup -- no landing required. Checked every frame
-// against every living ship (player, remote guest, bots); whichever ship
-// reaches a core first claims it (array splice makes this naturally
-// exclusive within one frame, no locking needed).
+// against every living ship (player, remote guest, bots); a ship that
+// already holds a color leaves a duplicate of it for someone else rather
+// than claiming it, applying equally to the player and every bot.
 function updateGravityMoonCorePickup(){
   var ships = allShips();
   for(var i=gmCores.length-1;i>=0;i--){
@@ -988,10 +973,17 @@ function updateGravityMoonCorePickup(){
       var ent=ships[s];
       if(!ent.alive) continue;
       if(dst(ent.x,ent.y,core.x,core.y) >= ent.r+GM_CORE_PICKUP_RADIUS) continue;
+      var alreadyHeld=false;
+      for(var h=0;h<ent.gmCoresHeld.length;h++){ if(ent.gmCoresHeld[h].id===core.id){ alreadyHeld=true; break; } }
+      if(alreadyHeld) continue; // leave it -- try the next ship in range instead
       gmCores.splice(i,1);
       ent.gmCoresHeld.push(core);
       spawnBurst(ent.x,ent.y,core.hex,14);
-      if(ent===player){ sfxAbility(); showAlert(core.id.toUpperCase()+' CORE COLLECTED ('+ent.gmCoresHeld.length+'/6)', 1800); }
+      if(ent===player){
+        sfxAbility();
+        showAlert(core.id.toUpperCase()+' CORE COLLECTED ('+ent.gmCoresHeld.length+'/6)', 1800);
+        if(ent.gmCoresHeld.length>=6) showAlert('ALL 6 CORES COLLECTED -- FLY TO THE TOP TO ESCAPE!', 3000);
+      }
       break;
     }
   }
@@ -999,43 +991,51 @@ function updateGravityMoonCorePickup(){
 
 /* =====================================================================
    GRAVITY MOON: ASTEROID RESOURCE NODES
-   The match starts with 3 large asteroids drifting in from the top.
-   Landing 3 weapon hits on one destroys it and has a chance to produce a
-   warp core (see gmSpawnCoreAt) -- a fresh asteroid always replaces it
-   from the top, so there's a steady ~3 in the sky to farm. They also
-   deal physical contact damage like Belt Blast's asteroids (see
-   resolveAsteroidCollision), and crashing into the terrain destroys one
-   for no reward (also replaced) -- only a deliberate 3-hit kill earns a
-   core. A population cap keeps a long no-timer match from accumulating
-   rocks forever.
+   The match starts with 3 large asteroids drifting in from the top. A
+   weapon hit immediately splits one large -> 2 medium -> 2 small each,
+   same cascade as Belt Blast's breakAsteroid (just without team-based
+   recoloring, since this is a teamless FFA); only destroying a SMALL
+   asteroid actually produces a warp core, and also replaces it with a
+   fresh large one from the top to keep the sky stocked with targets.
+   They also deal physical contact damage like Belt Blast's asteroids
+   (see resolveAsteroidCollision), and crashing into the terrain destroys
+   one for no reward (still replaced) regardless of its size. A
+   population cap keeps a long no-timer match from accumulating rocks
+   forever.
 ===================================================================== */
 var GM_ASTEROID_CAP = 20;
-var GM_ASTEROID_HITS_TO_KILL = 3;
-var gmAsteroids=[]; // [{x,y,vx,vy,size:'large',r,color:'neutral',jag,spin,spinBase,hits}, ...] -- same shape as Belt Blast's `asteroids` so drawAsteroid can render both unmodified
+var gmAsteroids=[]; // [{x,y,vx,vy,size,r,color:'neutral',jag,spin,spinBase}, ...] -- same shape as Belt Blast's `asteroids` so drawAsteroid can render both unmodified
 
-function makeGravityMoonAsteroid(x,y){
+function makeGravityMoonAsteroid(x,y,size){
   var jag=[]; for(var j=0;j<9;j++) jag.push(rnd(0.78,1.15));
-  return {x:x, y:y, vx:rnd(-0.3,0.3), vy:rnd(1.0,1.8), size:'large', r:BELT_SIZE_R.large, color:'neutral', jag:jag, spin:rnd(-0.0006,0.0006), spinBase:rnd(0,Math.PI*2), hits:0};
+  return {x:x, y:y, vx:rnd(-0.3,0.3), vy:rnd(1.0,1.8), size:size, r:BELT_SIZE_R[size], color:'neutral', jag:jag, spin:rnd(-0.0006,0.0006), spinBase:rnd(0,Math.PI*2)};
 }
 function spawnGravityMoonAsteroidFromTop(){
   if(gmAsteroids.length>=GM_ASTEROID_CAP) return;
-  gmAsteroids.push(makeGravityMoonAsteroid(rnd(100,WW-100), -40));
+  gmAsteroids.push(makeGravityMoonAsteroid(rnd(100,WW-100), -40, 'large'));
 }
-// A weapon hit counts toward the 3-hit kill. On the 3rd hit the asteroid
-// is destroyed, drops a core (if any color is still missing from play),
-// and is replaced by a fresh one from the top.
+function spawnGravityMoonAsteroidFragment(x,y,size){
+  if(gmAsteroids.length>=GM_ASTEROID_CAP) return;
+  gmAsteroids.push(makeGravityMoonAsteroid(x,y,size));
+}
+// Every weapon hit immediately breaks the asteroid: large -> 2 medium,
+// medium -> 2 small. Only a small asteroid's destruction produces a core
+// and a fresh large replacement from the top.
 function hitGravityMoonAsteroid(ast){
-  ast.hits = (ast.hits||0) + 1;
-  if(ast.hits < GM_ASTEROID_HITS_TO_KILL){
-    spawnBurst(ast.x, ast.y, '#c98a4b', 4);
-    return;
-  }
   var idx=gmAsteroids.indexOf(ast);
   if(idx===-1) return;
   gmAsteroids.splice(idx,1);
-  spawnBurst(ast.x, ast.y, '#c98a4b', 14);
-  gmSpawnCoreAt(ast.x, ast.y);
-  spawnGravityMoonAsteroidFromTop();
+  spawnBurst(ast.x, ast.y, '#c98a4b', 10);
+  if(ast.size==='large'){
+    spawnGravityMoonAsteroidFragment(ast.x-8, ast.y-8, 'medium');
+    spawnGravityMoonAsteroidFragment(ast.x+8, ast.y+8, 'medium');
+  } else if(ast.size==='medium'){
+    spawnGravityMoonAsteroidFragment(ast.x-6, ast.y-6, 'small');
+    spawnGravityMoonAsteroidFragment(ast.x+6, ast.y+6, 'small');
+  } else {
+    gmSpawnCoreAt(ast.x, ast.y);
+    spawnGravityMoonAsteroidFromTop();
+  }
 }
 function updateGravityMoonAsteroids(dt){
   for(var i=gmAsteroids.length-1;i>=0;i--){
@@ -1045,7 +1045,7 @@ function updateGravityMoonAsteroids(dt){
       gmAsteroids.splice(i,1);
       spawnBurst(a.x, a.y, '#c98a4b', 16);
       sfxShipExplosion();
-      spawnGravityMoonAsteroidFromTop(); // steady-state replace, no core -- only a deliberate 3-hit kill earns one
+      spawnGravityMoonAsteroidFromTop(); // steady-state replace, no core -- only a deliberate small-asteroid kill earns one
     }
   }
 }
@@ -1703,12 +1703,17 @@ function updateIdleRegen(dt){
 /* =====================================================================
    AMMO REGEN -- every ship has a 3-shot pool. One shot regenerates every
    AMMO_REGEN_MS, up to MAX_AMMO. Applies to player and bots alike.
+   Gravity Moon regenerates much faster (near-continuous fire) since the
+   mode is built around constantly farming asteroids and fighting for
+   cores -- the default pace felt far too slow for it.
 ===================================================================== */
+var GM_AMMO_REGEN_MS = 350;
 function updateAmmoRegen(e, dt){
   if(!e.alive) return;
   if(e.ammo>=MAX_AMMO) return;
   e.ammoRegenTimer += dt;
-  if(e.ammoRegenTimer>=AMMO_REGEN_MS){
+  var regenMs = gameMode==='gravitymoon' ? GM_AMMO_REGEN_MS : AMMO_REGEN_MS;
+  if(e.ammoRegenTimer>=regenMs){
     e.ammoRegenTimer=0;
     e.ammo=Math.min(MAX_AMMO, e.ammo+1);
   }
@@ -2910,7 +2915,7 @@ function getInstructionsContent(mode){
   if(mode==='gravitymoon'){
     return {
       title: 'GRAVITY MOON',
-      goal: 'A 3-way free-for-all against constant gravity. Point your nose away from the surface and thrust to resist it -- turning to fight stops your climb, and landing too hard destroys you. No warp cores exist at the start -- earn them: 3 hits destroys an asteroid and has a chance to drop one of the 6 colors, and destroying a rival ship does too (and drops whatever they were carrying). Fly close to a floating core to grab it -- no landing required. The more cores you hold, the better your ship maneuvers and the higher you can fly. Collect all 6 distinct colors to win.',
+      goal: 'A 3-way free-for-all against constant gravity. Point your nose away from the surface and thrust to resist it -- turning to fight stops your climb, and landing too hard destroys you. No warp cores exist at the start -- shoot an asteroid and it splits (large into 2 medium, medium into 2 small); only destroying a small asteroid drops a core, in a random color. Destroying a rival ship also has a chance to drop one, plus whatever they were carrying. Fly close to a floating core to grab it -- no landing required -- but you can only hold one of each color. The more cores you hold, the better your ship maneuvers and the higher you can fly. Once you hold all 6 distinct colors, fly to the top of the sky to escape the moon\'s gravity and win.',
       rewards: 'Win a Gravity Moon match and you earn $'+GALACTIC_BUCKS_PER_WIN+' Galactic Bucks -- a currency separate from your gem chest.',
       rewardsUse: 'Spend Galactic Bucks ($'+SPACE_STATION_UPGRADE_COST+' each) at the Space Station in the hangar on powerful one-battle upgrades for your next match: Destructo Missile, Extra Perma-Shield, Cloak, or a Deputy Drone.'
     };
@@ -4999,7 +5004,12 @@ function updateBotAI_GravityMoon(b, dt){
   var farmAsteroid = null;
   var huntTarget = null;
   var goalAngle;
-  if(core){
+  if(b.gmCoresHeld.length>=6){
+    // Holds all 6 -- nothing left to fight or farm for, just climb
+    // straight up to escape the moon's gravity and win.
+    b.aiState='escape';
+    goalAngle = upAngle;
+  } else if(core){
     b.aiState='collect';
     goalAngle = angTo(b.x, b.y, core.x, core.y);
   } else {
@@ -5602,10 +5612,10 @@ function update(dt){
     }
   } else if(gameMode==='gravitymoon'){
     if(!player.alive){ endGame(false,'gravitymoonDied'); }
-    else if(player.gmCoresHeld.length>=6){ endGame(true,'gravitymoonWon'); }
+    else if(player.gmCoresHeld.length>=6 && player.y<=GM_ESCAPE_Y){ endGame(true,'gravitymoonWon'); }
     else {
       for(var i=0;i<bots.length;i++){
-        if(bots[i].alive && bots[i].gmCoresHeld.length>=6){ endGame(false,'gravitymoonLost'); break; }
+        if(bots[i].alive && bots[i].gmCoresHeld.length>=6 && bots[i].y<=GM_ESCAPE_Y){ endGame(false,'gravitymoonLost'); break; }
       }
     }
   } else {
