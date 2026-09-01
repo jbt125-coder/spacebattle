@@ -75,7 +75,7 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 /* Title screen */
 #titleScreen{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at 50% 60%,rgba(40,0,80,0.98) 0%,rgba(0,0,12,1) 70%);z-index:101;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;cursor:pointer;}
 #titleScreen canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
-#titleTapHint{font-family:‘Orbitron’,monospace;font-size:11px;letter-spacing:4px;color:rgba(255,238,0,0.6);margin-top:40px;animation:blink 1.4s ease-in-out infinite;position:relative;z-index:2;}
+#titleTapHint{font-family:‘Orbitron’,monospace;font-size:11px;letter-spacing:4px;color:rgba(255,238,0,0.6);margin-top:40px;animation:blink 1.4s ease-in-out infinite;position:relative;top:32px;z-index:2;}
 @keyframes blink{0%,100%{opacity:0.3;}50%{opacity:1;}}
 
 /* Audio perm */
@@ -92,11 +92,12 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 #selectScreen{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,rgba(0,80,120,0.18),transparent 60%),#000;z-index:90;display:none;flex-direction:column;align-items:center;padding:20px;overflow-y:auto;}
 #selectScreen h1{font-size:26px;font-weight:900;letter-spacing:4px;color:#00d4ff;text-shadow:0 0 8px rgba(0,212,255,0.6);margin-top:10px;text-align:center;}
 #selectSub{font-size:10px;letter-spacing:3px;color:rgba(0,212,255,0.45);margin-top:6px;margin-bottom:18px;text-align:center;text-transform:uppercase;}
-#modeToggleWrap{display:flex;align-items:center;gap:4px;margin-bottom:14px;max-width:480px;width:100%;}
-#modeToggleRow{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
-#modeToggleRow::-webkit-scrollbar{display:none;}
+#modeToggleWrap{display:flex;align-items:center;gap:4px;margin-bottom:6px;max-width:480px;width:100%;}
+#modeToggleRow{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;overflow:hidden;padding:10px 0;touch-action:pan-y;}
 .modeScrollArrow{flex-shrink:0;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.35);color:#66eaff;width:24px;height:24px;min-width:24px;border-radius:50%;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;}
-.modeToggleBtn{flex-shrink:0;scroll-snap-align:start;background:transparent;border:1px solid rgba(0,212,255,0.35);color:rgba(102,234,255,0.6);font-family:inherit;font-weight:700;letter-spacing:1.5px;font-size:10px;padding:8px 16px;border-radius:6px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
+.modeSlot{flex-shrink:0;transition:transform 0.22s ease,opacity 0.22s ease;opacity:0.5;transform:scale(0.82);}
+.modeSlot.modeSlotCenter{opacity:1;transform:scale(1);}
+.modeToggleBtn{background:transparent;border:1px solid rgba(0,212,255,0.35);color:rgba(102,234,255,0.6);font-family:inherit;font-weight:700;letter-spacing:1.5px;font-size:10px;padding:8px 16px;border-radius:6px;cursor:pointer;-webkit-tap-highlight-color:transparent;white-space:nowrap;}
 .modeToggleBtn.active{background:rgba(0,212,255,0.15);border-color:#00d4ff;color:#00d4ff;animation:modePulse 1.8s ease-in-out infinite;}
 @keyframes modePulse{0%,100%{box-shadow:0 0 4px rgba(0,212,255,0.35);}50%{box-shadow:0 0 15px rgba(0,212,255,0.95), 0 0 4px rgba(0,212,255,0.6);}}
 #carousel{position:relative;display:flex;align-items:center;justify-content:center;gap:4px;width:100%;max-width:520px;}
@@ -363,14 +364,13 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
   <h1>SPACE RANGER BATTLE</h1>
   <div id="selectSub">Choose your ranger -- Arena Protocol</div>
   <div id="modeToggleWrap">
-    <button class="modeScrollArrow" id="modeScrollLeftBtn" aria-label="Scroll modes left">&#10094;</button>
+    <button class="modeScrollArrow" id="modeScrollLeftBtn" aria-label="Previous mode">&#10094;</button>
     <div id="modeToggleRow">
-      <button class="modeToggleBtn active" id="modeArenaBtn">BATTLE ARENA</button>
-      <button class="modeToggleBtn" id="modeWarpBtn">WARP CORE</button>
-      <button class="modeToggleBtn" id="modeBeltBtn">BELT BLAST</button>
-      <button class="modeToggleBtn" id="modeGravityBtn">GRAVITY MOON</button>
+      <div class="modeSlot" id="modeSlotLeft"></div>
+      <div class="modeSlot modeSlotCenter" id="modeSlotCenter"></div>
+      <div class="modeSlot" id="modeSlotRight"></div>
     </div>
-    <button class="modeScrollArrow" id="modeScrollRightBtn" aria-label="Scroll modes right">&#10095;</button>
+    <button class="modeScrollArrow" id="modeScrollRightBtn" aria-label="Next mode">&#10095;</button>
   </div>
   <div id="gemBankRow"><span class="gicon">&#9670;</span>HANGAR CHEST: <span id="gemBankVal">0</span> GEMS</div>
   <div id="bucksBankRow"><span class="gicon">$</span>GALACTIC BUCKS: <span id="bucksBankVal">0</span></div>
@@ -2314,8 +2314,11 @@ document.getElementById('ytPlay').addEventListener('click',function(){
     pg.addColorStop(1,'rgba(0,0,0,0)');
     tx.fillStyle=pg; tx.fillRect(0,0,w,h);
 
+    // Anchor moved up ~20% from the original h*0.36 baseline to open up
+    // room below for the subtitle + tap hint without crowding them.
+    var titleAnchorY = h*0.36*0.8;
     tx.save();
-    tx.translate(w/2, h*0.36);
+    tx.translate(w/2, titleAnchorY);
     tx.rotate(-0.045);
 
     var fs=Math.min(w*0.11, h*0.085, 50);
@@ -2326,6 +2329,35 @@ document.getElementById('ytPlay').addEventListener('click',function(){
     for(var li=0;li<lines.length;li++){
       var ly=(li-(lines.length-1)/2)*lineGap;
       tx.font='900 '+fs+'px Orbitron,monospace';
+
+      if(lines[li]==='BATTLE'){
+        // BATTLE gets a hot-pink triple-layered treatment instead of the
+        // shared blue gradient below -- three overlapping copies at small
+        // offsets (back-to-front, most-offset/dimmest first) so it reads
+        // as a stacked/glitchy neon depth effect rather than a flat fill.
+        var pinkLayers=[
+          {dx:-3, dy:-2, color:'rgba(255,20,147,0.45)', blur:36},
+          {dx: 3, dy: 2, color:'rgba(255,90,200,0.55)', blur:24},
+          {dx: 0, dy: 0, color:'#ff2fb0', blur:16}
+        ];
+        for(var pl=0;pl<pinkLayers.length;pl++){
+          var layer=pinkLayers[pl];
+          tx.shadowColor='rgba(255,20,147,0.9)';
+          tx.shadowBlur=layer.blur;
+          tx.fillStyle=layer.color;
+          tx.fillText(lines[li],layer.dx,ly+layer.dy);
+        }
+
+        shine=(shine+0.002)%1;
+        var psw=w*0.45;
+        var psg=tx.createLinearGradient(-psw+shine*psw*2.5,ly-fs,-psw+shine*psw*2.5+psw*0.4,ly+fs);
+        psg.addColorStop(0,'rgba(255,255,255,0)');
+        psg.addColorStop(0.5,'rgba(255,255,255,0.5)');
+        psg.addColorStop(1,'rgba(255,255,255,0)');
+        tx.fillStyle=psg; tx.shadowBlur=0;
+        tx.fillText(lines[li],0,ly);
+        continue;
+      }
 
       tx.shadowColor='rgba(0,200,255,0.9)';
       tx.shadowBlur=40;
@@ -2353,7 +2385,7 @@ document.getElementById('ytPlay').addEventListener('click',function(){
     }
     tx.restore();
 
-    var subY=h*0.36+(lines.length-1)/2*lineGap+fs*1.0;
+    var subY=titleAnchorY+(lines.length-1)/2*lineGap+fs*1.0;
     var subFs=Math.min(w*0.026,12);
     tx.save();
     tx.font='bold '+subFs+'px Orbitron,monospace';
@@ -2873,20 +2905,66 @@ function showSelectScreen(){
   document.getElementById('inviteFriendBtn').style.display = (netRole==='guest' || gameMode==='warpcore' || gameMode==='beltblast' || gameMode==='gravitymoon') ? 'none' : 'inline-block';
   updateDetail();
 }
+/* =====================================================================
+   MODE PICKER -- a 3-slot centered carousel (prev/current/next), the
+   exact same interaction pattern as the ship carousel below: the current
+   mode is always the one dead-center, arrows/swipe step one at a time,
+   and the DOM is fully rebuilt on every step rather than freely scrolled.
+===================================================================== */
+var MODES=['arena','warpcore','beltblast','gravitymoon'];
+var MODE_LABELS={arena:'BATTLE ARENA', warpcore:'WARP CORE', beltblast:'BELT BLAST', gravitymoon:'GRAVITY MOON'};
+var modeIndex=0; // index into MODES of the currently centered/active mode
+
+function modeAtOffset(offset){
+  var n=MODES.length;
+  return MODES[((modeIndex+offset)%n+n)%n];
+}
+function buildModeChip(modeId, isCenter){
+  var btn=document.createElement('button');
+  btn.className='modeToggleBtn'+(isCenter?' active':'');
+  btn.textContent=MODE_LABELS[modeId];
+  if(!isCenter) btn.addEventListener('click',function(){ setGameMode(modeId); });
+  return btn;
+}
+function renderModeCarousel(){
+  var slotLeft=document.getElementById('modeSlotLeft');
+  var slotCenter=document.getElementById('modeSlotCenter');
+  var slotRight=document.getElementById('modeSlotRight');
+  slotLeft.innerHTML=''; slotCenter.innerHTML=''; slotRight.innerHTML='';
+  slotLeft.appendChild(buildModeChip(modeAtOffset(-1), false));
+  slotCenter.appendChild(buildModeChip(modeAtOffset(0), true));
+  slotRight.appendChild(buildModeChip(modeAtOffset(1), false));
+}
+function modePrev(){ setGameMode(modeAtOffset(-1)); }
+function modeNext(){ setGameMode(modeAtOffset(1)); }
 function setGameMode(mode){
   gameMode=mode;
-  document.getElementById('modeArenaBtn').classList.toggle('active', mode==='arena');
-  document.getElementById('modeWarpBtn').classList.toggle('active', mode==='warpcore');
-  document.getElementById('modeBeltBtn').classList.toggle('active', mode==='beltblast');
-  document.getElementById('modeGravityBtn').classList.toggle('active', mode==='gravitymoon');
+  var idx=MODES.indexOf(mode);
+  if(idx!==-1) modeIndex=idx;
+  renderModeCarousel();
   document.getElementById('inviteFriendBtn').style.display = (netRole==='guest' || mode==='warpcore' || mode==='beltblast' || mode==='gravitymoon') ? 'none' : 'inline-block';
 }
-document.getElementById('modeArenaBtn').addEventListener('click',function(){ setGameMode('arena'); });
-document.getElementById('modeWarpBtn').addEventListener('click',function(){ setGameMode('warpcore'); });
-document.getElementById('modeBeltBtn').addEventListener('click',function(){ setGameMode('beltblast'); });
-document.getElementById('modeGravityBtn').addEventListener('click',function(){ setGameMode('gravitymoon'); });
-document.getElementById('modeScrollLeftBtn').addEventListener('click',function(){ document.getElementById('modeToggleRow').scrollBy({left:-120,behavior:'smooth'}); });
-document.getElementById('modeScrollRightBtn').addEventListener('click',function(){ document.getElementById('modeToggleRow').scrollBy({left:120,behavior:'smooth'}); });
+document.getElementById('modeScrollLeftBtn').addEventListener('click', modePrev);
+document.getElementById('modeScrollRightBtn').addEventListener('click', modeNext);
+(function(){
+  var track=document.getElementById('modeToggleRow');
+  var dragging=false, startX=0;
+  var SWIPE_THRESHOLD=40;
+  function start(x){ dragging=true; startX=x; }
+  function end(x){
+    if(!dragging) return;
+    dragging=false;
+    var dx=x-startX;
+    if(dx<=-SWIPE_THRESHOLD) modeNext();
+    else if(dx>=SWIPE_THRESHOLD) modePrev();
+  }
+  track.addEventListener('touchstart',function(e){ start(e.touches[0].clientX); },{passive:true});
+  track.addEventListener('touchend',function(e){ end(e.changedTouches[0].clientX); });
+  track.addEventListener('touchcancel',function(){ dragging=false; });
+  track.addEventListener('mousedown',function(e){ start(e.clientX); e.preventDefault(); });
+  window.addEventListener('mouseup',function(e){ if(dragging) end(e.clientX); });
+})();
+renderModeCarousel();
 // Pre-battle instructions -- explains the goal/rewards for whichever mode
 // is currently selected, gated behind progress.showInstructions so it can
 // be permanently dismissed (the "don't show again" toggle here, or the
