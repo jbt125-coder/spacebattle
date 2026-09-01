@@ -75,7 +75,7 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 /* Title screen */
 #titleScreen{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at 50% 60%,rgba(40,0,80,0.98) 0%,rgba(0,0,12,1) 70%);z-index:101;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:20px;cursor:pointer;}
 #titleScreen canvas{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;}
-#titleTapHint{font-family:‘Orbitron’,monospace;font-size:11px;letter-spacing:4px;color:rgba(255,238,0,0.6);margin-top:40px;animation:blink 1.4s ease-in-out infinite;position:relative;z-index:2;}
+#titleTapHint{font-family:‘Orbitron’,monospace;font-size:11px;letter-spacing:4px;color:rgba(255,238,0,0.6);margin-top:40px;animation:blink 1.4s ease-in-out infinite;position:relative;top:32px;z-index:2;}
 @keyframes blink{0%,100%{opacity:0.3;}50%{opacity:1;}}
 
 /* Audio perm */
@@ -92,8 +92,8 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 #selectScreen{position:fixed;top:0;left:0;width:100%;height:100%;background:radial-gradient(ellipse at 50% 0%,rgba(0,80,120,0.18),transparent 60%),#000;z-index:90;display:none;flex-direction:column;align-items:center;padding:20px;overflow-y:auto;}
 #selectScreen h1{font-size:26px;font-weight:900;letter-spacing:4px;color:#00d4ff;text-shadow:0 0 8px rgba(0,212,255,0.6);margin-top:10px;text-align:center;}
 #selectSub{font-size:10px;letter-spacing:3px;color:rgba(0,212,255,0.45);margin-top:6px;margin-bottom:18px;text-align:center;text-transform:uppercase;}
-#modeToggleWrap{display:flex;align-items:center;gap:4px;margin-bottom:14px;max-width:480px;width:100%;}
-#modeToggleRow{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+#modeToggleWrap{display:flex;align-items:center;gap:4px;margin-bottom:6px;max-width:480px;width:100%;}
+#modeToggleRow{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;scrollbar-width:none;padding:10px 4px;}
 #modeToggleRow::-webkit-scrollbar{display:none;}
 .modeScrollArrow{flex-shrink:0;background:rgba(0,212,255,0.08);border:1px solid rgba(0,212,255,0.35);color:#66eaff;width:24px;height:24px;min-width:24px;border-radius:50%;font-size:11px;cursor:pointer;display:flex;align-items:center;justify-content:center;-webkit-tap-highlight-color:transparent;}
 .modeToggleBtn{flex-shrink:0;scroll-snap-align:start;background:transparent;border:1px solid rgba(0,212,255,0.35);color:rgba(102,234,255,0.6);font-family:inherit;font-weight:700;letter-spacing:1.5px;font-size:10px;padding:8px 16px;border-radius:6px;cursor:pointer;-webkit-tap-highlight-color:transparent;}
@@ -2327,6 +2327,35 @@ document.getElementById('ytPlay').addEventListener('click',function(){
       var ly=(li-(lines.length-1)/2)*lineGap;
       tx.font='900 '+fs+'px Orbitron,monospace';
 
+      if(lines[li]==='BATTLE'){
+        // BATTLE gets a hot-pink triple-layered treatment instead of the
+        // shared blue gradient below -- three overlapping copies at small
+        // offsets (back-to-front, most-offset/dimmest first) so it reads
+        // as a stacked/glitchy neon depth effect rather than a flat fill.
+        var pinkLayers=[
+          {dx:-3, dy:-2, color:'rgba(255,20,147,0.45)', blur:36},
+          {dx: 3, dy: 2, color:'rgba(255,90,200,0.55)', blur:24},
+          {dx: 0, dy: 0, color:'#ff2fb0', blur:16}
+        ];
+        for(var pl=0;pl<pinkLayers.length;pl++){
+          var layer=pinkLayers[pl];
+          tx.shadowColor='rgba(255,20,147,0.9)';
+          tx.shadowBlur=layer.blur;
+          tx.fillStyle=layer.color;
+          tx.fillText(lines[li],layer.dx,ly+layer.dy);
+        }
+
+        shine=(shine+0.002)%1;
+        var psw=w*0.45;
+        var psg=tx.createLinearGradient(-psw+shine*psw*2.5,ly-fs,-psw+shine*psw*2.5+psw*0.4,ly+fs);
+        psg.addColorStop(0,'rgba(255,255,255,0)');
+        psg.addColorStop(0.5,'rgba(255,255,255,0.5)');
+        psg.addColorStop(1,'rgba(255,255,255,0)');
+        tx.fillStyle=psg; tx.shadowBlur=0;
+        tx.fillText(lines[li],0,ly);
+        continue;
+      }
+
       tx.shadowColor='rgba(0,200,255,0.9)';
       tx.shadowBlur=40;
       tx.fillStyle='rgba(0,180,255,0.2)';
@@ -2872,6 +2901,24 @@ function showSelectScreen(){
   if(netRole) setGameMode('arena');
   document.getElementById('inviteFriendBtn').style.display = (netRole==='guest' || gameMode==='warpcore' || gameMode==='beltblast' || gameMode==='gravitymoon') ? 'none' : 'inline-block';
   updateDetail();
+  // Center the active mode button once the row has real layout (display
+  // just flipped to flex this frame, so wait a tick for clientWidth/
+  // offsetLeft to be accurate) -- snap on first show, no need to animate.
+  requestAnimationFrame(function(){ centerActiveModeButton(false); });
+}
+function centerActiveModeButton(smooth){
+  var row=document.getElementById('modeToggleRow');
+  var btn=row.querySelector('.modeToggleBtn.active');
+  if(!btn) return;
+  // Give the row enough blank scroll room on both ends that even the
+  // first/last button can reach true horizontal center -- without this,
+  // scrollWidth-clientWidth clamps the outermost buttons short of center.
+  var pad = Math.max(4, Math.round(row.clientWidth/2));
+  row.style.paddingLeft = pad+'px';
+  row.style.paddingRight = pad+'px';
+  var target = btn.offsetLeft - (row.clientWidth - btn.offsetWidth)/2;
+  target = Math.max(0, Math.min(target, row.scrollWidth - row.clientWidth));
+  row.scrollTo({left:target, behavior: smooth===false ? 'auto' : 'smooth'});
 }
 function setGameMode(mode){
   gameMode=mode;
@@ -2880,6 +2927,7 @@ function setGameMode(mode){
   document.getElementById('modeBeltBtn').classList.toggle('active', mode==='beltblast');
   document.getElementById('modeGravityBtn').classList.toggle('active', mode==='gravitymoon');
   document.getElementById('inviteFriendBtn').style.display = (netRole==='guest' || mode==='warpcore' || mode==='beltblast' || mode==='gravitymoon') ? 'none' : 'inline-block';
+  centerActiveModeButton(true);
 }
 document.getElementById('modeArenaBtn').addEventListener('click',function(){ setGameMode('arena'); });
 document.getElementById('modeWarpBtn').addEventListener('click',function(){ setGameMode('warpcore'); });
