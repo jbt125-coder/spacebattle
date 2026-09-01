@@ -28,8 +28,8 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 .hud-val.warn{color:#ff4444;text-shadow:0 0 12px rgba(255,68,68,0.6);}
 .gmCoreDot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;border:1px solid rgba(255,255,255,0.3);opacity:0.25;}
 .gmCoreDot.held{opacity:1;box-shadow:0 0 6px currentColor;}
-.gmCoreDot.cooling{animation:gmCoolPulse 1s ease-in-out infinite;}
-@keyframes gmCoolPulse{0%,100%{opacity:0.15;}50%{opacity:0.55;}}
+.gmCoreDot.available{animation:gmAvailPulse 1s ease-in-out infinite;}
+@keyframes gmAvailPulse{0%,100%{opacity:0.4;}50%{opacity:0.9;}}
 #shieldBar{width:120px;height:8px;background:rgba(0,212,255,0.15);border-radius:4px;border:1px solid rgba(0,212,255,0.3);overflow:hidden;margin-top:3px;}
 #shieldFill{height:100%;background:#00d4ff;border-radius:4px;transition:width 0.2s,background 0.3s;}
 #shieldFill.teamB{background:#ff4444;}
@@ -884,35 +884,32 @@ function resolveAsteroids(ent){
    A true side-view Lunar-Lander-style FFA. Gravity is brutal at the
    start -- pointing the nose away from the jagged moon surface and
    thrusting is close to mandatory just to survive -- and eases up (both
-   weaker gravity and stronger thrust/turning) with every core held. Six
-   uniquely-colored cores sit at fixed pads set into the terrain --
-   landing on an uncollected pad at a safe speed claims it. Whoever
-   holds all 6 wins.
+   weaker gravity and stronger thrust/turning) with every core held.
+   Warp cores don't exist anywhere at match start -- they're earned:
+   shooting an asteroid down (3 hits) or destroying a ship each have a
+   chance to produce one of the 6 uniquely-colored cores, which then
+   floats in open space until a ship flies close enough to grab it (no
+   landing required). Whoever holds all 6 distinct colors wins.
 ===================================================================== */
 var GM_GRAVITY = 0.16; // constant downward accel at 0 cores held -- close to a slow ship's own thrustPower, so climbing demands near-perfect upward aim
 var GM_GRAVITY_REDUCTION_PER_CORE = 0.12; // each core held cuts effective gravity by another 12%, down to 28% of the base pull at 6
 var GM_SAFE_LANDING_SPEED = 3; // vy at/under this on touchdown = soft landing
 var GM_LETHAL_LANDING_SPEED = 8; // vy at/over this on touchdown = instant destroy
 var GM_MANEUVER_PER_CORE = 0.15; // +15% thrust & turn rate per core held, up to +90% at 6
-var GM_PAD_PICKUP_RADIUS = 70;
+var GM_CORE_PICKUP_RADIUS = 90; // open-air proximity grab, no landing needed
 var GM_FALL_CAUTION_SPEED = 4; // bot AI: vy at/above this + close to the ground triggers the survival override
 var GM_GROUND_CAUTION_DIST = 260; // bot AI: how far above the ground the caution zone starts
 var GM_PAD_COLORS = [
   {id:'red', hex:'#ff4444'}, {id:'yellow', hex:'#ffee00'}, {id:'purple', hex:'#aa55ff'},
   {id:'green', hex:'#44ff88'}, {id:'blue', hex:'#3399ff'}, {id:'orange', hex:'#ff9922'}
 ];
-var GM_CORE_COOLDOWN_MS = 15000; // how long a pad cools down after its core is taken before a fresh one appears
-var gmPads=[]; // [{id,hex,padX,padY,cooldownTimer}, ...] -- always 6, one per color, fixed location set into the jagged terrain
-var gmCores=[]; // [{id,hex,padX,padY}, ...] -- core instances currently sitting on their pad, uncollected; removed on pickup (moves into gmCoresHeld) and re-added when that pad's cooldown expires -- can briefly hold a duplicate color if a pad regenerates while its original is still being carried
+var gmCores=[]; // [{id,hex,x,y}, ...] -- floating, uncollected core pickups currently in the world (earned, not pre-placed); at most one live instance of each color exists anywhere (world + everyone's gmCoresHeld combined) at any time
 
 // Jagged moon-surface terrain, classic-Lunar-Lander style: a polyline of
-// {x,y} points spanning the width, with a flat shelf carved in wherever a
-// core pad sits so every pad is always a safe, level landing spot no
-// matter how rough the terrain around it gets.
+// {x,y} points spanning the width.
 var GM_TERRAIN_SEGMENTS = 26;
 var GM_TERRAIN_MIN_Y = WH - 550; // highest peaks
 var GM_TERRAIN_MAX_Y = WH - 90;  // lowest valley floor
-var GM_PAD_FLAT_HALF_WIDTH = 100; // how wide a flat shelf is carved around each pad
 var gmTerrain = []; // [{x,y}, ...] sorted by x, defines the moon surface height at any point
 
 function gmTerrainHeightAt(x){
@@ -927,8 +924,6 @@ function gmTerrainHeightAt(x){
   return gmTerrain.length ? gmTerrain[gmTerrain.length-1].y : GM_TERRAIN_MAX_Y;
 }
 
-// Also fully restocks gmCores once every pad's height is known (a pad's
-// padY isn't settled until the terrain around it is generated).
 function generateGravityMoonTerrain(){
   gmTerrain=[];
   var stepX=WW/(GM_TERRAIN_SEGMENTS-1);
@@ -937,38 +932,6 @@ function generateGravityMoonTerrain(){
     y = clamp(y+rnd(-170,170), GM_TERRAIN_MIN_Y, GM_TERRAIN_MAX_Y);
     gmTerrain.push({x:i*stepX, y:y});
   }
-  // Sample each pad's natural height from the raw jagged terrain BEFORE
-  // carving any shelves, so one pad's shelf never skews another's height.
-  for(var p=0;p<gmPads.length;p++) gmPads[p].padY = gmTerrainHeightAt(gmPads[p].padX);
-  // Carve an exact flat shelf under each pad: drop any grid points that
-  // fall inside it and insert two endpoints at the pad's height, so the
-  // whole span interpolates dead level no matter how the random-walk grid
-  // points happened to fall relative to this pad's x.
-  for(var p=0;p<gmPads.length;p++){
-    var padX=gmPads[p].padX, padY=gmPads[p].padY;
-    gmTerrain = gmTerrain.filter(function(pt){ return Math.abs(pt.x-padX) >= GM_PAD_FLAT_HALF_WIDTH; });
-    gmTerrain.push({x:padX-GM_PAD_FLAT_HALF_WIDTH, y:padY});
-    gmTerrain.push({x:padX+GM_PAD_FLAT_HALF_WIDTH, y:padY});
-  }
-  gmTerrain.sort(function(a,b){ return a.x-b.x; });
-  gmCores=[];
-  for(var p=0;p<gmPads.length;p++) gmCores.push({id:gmPads[p].id, hex:gmPads[p].hex, padX:gmPads[p].padX, padY:gmPads[p].padY});
-}
-
-// Spreads the 6 colored pads evenly across the width. padY and the initial
-// gmCores stock are filled in afterward by generateGravityMoonTerrain once
-// the terrain height at each pad's x is known.
-function placeGravityMoonPads(){
-  gmPads=[];
-  for(var i=0;i<GM_PAD_COLORS.length;i++){
-    var frac = 0.12 + (0.76/(GM_PAD_COLORS.length-1))*i;
-    gmPads.push({id:GM_PAD_COLORS[i].id, hex:GM_PAD_COLORS[i].hex, padX:WW*frac, padY:0, cooldownTimer:0});
-  }
-}
-
-function gmPadFor(id){
-  for(var i=0;i<gmPads.length;i++) if(gmPads[i].id===id) return gmPads[i];
-  return null;
 }
 
 // Cores-based flight ceiling: brutal at 0 cores (can't fly far above the
@@ -983,84 +946,96 @@ function gmCeilingYFor(ent){
   return GM_CEILING_Y_AT_0_CORES - (GM_CEILING_Y_AT_0_CORES-GM_CEILING_Y_AT_MAX_CORES)*frac;
 }
 
-// Returns every core a ship was holding to its own pad (unless a regenerated
-// copy already beat it back there) and makes that pad instantly available
-// again -- used on any Gravity Moon death, matching the "return to spawn"
-// rule (no extra cooldown wait for a core that was already lost).
-function gmReturnCoresToPads(ent){
-  for(var i=0;i<ent.gmCoresHeld.length;i++){
-    var core=ent.gmCoresHeld[i];
-    var onPad=false;
-    for(var j=0;j<gmCores.length;j++){ if(gmCores[j].id===core.id){ onPad=true; break; } }
-    if(!onPad) gmCores.push(core);
-    var pad=gmPadFor(core.id);
-    if(pad) pad.cooldownTimer=0;
+// The color of the next core that should be produced, or null if all 6
+// are already accounted for somewhere (floating in gmCores, or held by
+// some living ship) -- since at most one live instance of a color exists
+// at a time, this is what keeps "collect all 6" meaningful no matter how
+// many times a spawn is triggered.
+function gmNextMissingColorId(){
+  var all=allShips();
+  for(var c=0;c<GM_PAD_COLORS.length;c++){
+    var id=GM_PAD_COLORS[c].id;
+    var live=false;
+    for(var i=0;i<gmCores.length;i++){ if(gmCores[i].id===id){ live=true; break; } }
+    if(!live){
+      for(var s=0;s<all.length && !live;s++){
+        for(var h=0;h<all[s].gmCoresHeld.length;h++){ if(all[s].gmCoresHeld[h].id===id){ live=true; break; } }
+      }
+    }
+    if(!live) return GM_PAD_COLORS[c];
   }
-  ent.gmCoresHeld=[];
+  return null;
+}
+// Drops a new core of whatever color is still missing at the given spot
+// (a destroyed asteroid or a ship's death site) -- a no-op once all 6
+// colors are already in play somewhere.
+function gmSpawnCoreAt(x,y){
+  var colorDef = gmNextMissingColorId();
+  if(!colorDef) return;
+  gmCores.push({id:colorDef.id, hex:colorDef.hex, x:x, y:y});
+  spawnBurst(x, y, colorDef.hex, 12);
 }
 
-// Ticks every pad's regen cooldown; once it crosses 0, restocks gmCores with
-// a fresh instance of that color if one isn't already sitting there (e.g.
-// the original already returned on death in the meantime).
-function updateGravityMoonPads(dt){
-  for(var i=0;i<gmPads.length;i++){
-    var pad=gmPads[i];
-    if(pad.cooldownTimer>0){
-      pad.cooldownTimer -= dt;
-      if(pad.cooldownTimer<=0){
-        pad.cooldownTimer=0;
-        var stocked=false;
-        for(var j=0;j<gmCores.length;j++){ if(gmCores[j].id===pad.id){ stocked=true; break; } }
-        if(!stocked) gmCores.push({id:pad.id, hex:pad.hex, padX:pad.padX, padY:pad.padY});
-      }
+// Open-air proximity pickup -- no landing required. Checked every frame
+// against every living ship (player, remote guest, bots); whichever ship
+// reaches a core first claims it (array splice makes this naturally
+// exclusive within one frame, no locking needed).
+function updateGravityMoonCorePickup(){
+  var ships = allShips();
+  for(var i=gmCores.length-1;i>=0;i--){
+    var core=gmCores[i];
+    for(var s=0;s<ships.length;s++){
+      var ent=ships[s];
+      if(!ent.alive) continue;
+      if(dst(ent.x,ent.y,core.x,core.y) >= ent.r+GM_CORE_PICKUP_RADIUS) continue;
+      gmCores.splice(i,1);
+      ent.gmCoresHeld.push(core);
+      spawnBurst(ent.x,ent.y,core.hex,14);
+      if(ent===player){ sfxAbility(); showAlert(core.id.toUpperCase()+' CORE COLLECTED ('+ent.gmCoresHeld.length+'/6)', 1800); }
+      break;
     }
   }
 }
 
 /* =====================================================================
-   GRAVITY MOON: FALLING ASTEROID HAZARDS
-   Every core taken drifts one asteroid in from the top of the map. They
-   fall at a slow constant drift (not affected by GM_GRAVITY -- they're
-   inert rocks, not ships), deal physical contact damage like Belt Blast's
-   asteroids (see resolveAsteroidCollision), and fragment large -> 2
-   medium -> 2 small on a weapon hit -- same cascade and size/damage
-   constants as Belt Blast (BELT_SIZE_R/BELT_COLLISION_DAMAGE), just
-   without team-based recoloring since this is a teamless FFA. Reaching
-   the terrain explodes the asteroid and replaces it with two fresh ones
-   from the top: shooting one down all the way reduces the hazard count,
-   letting one crash escalates it. A population cap keeps a long no-timer
-   match from accumulating rocks forever.
+   GRAVITY MOON: ASTEROID RESOURCE NODES
+   The match starts with 3 large asteroids drifting in from the top.
+   Landing 3 weapon hits on one destroys it and has a chance to produce a
+   warp core (see gmSpawnCoreAt) -- a fresh asteroid always replaces it
+   from the top, so there's a steady ~3 in the sky to farm. They also
+   deal physical contact damage like Belt Blast's asteroids (see
+   resolveAsteroidCollision), and crashing into the terrain destroys one
+   for no reward (also replaced) -- only a deliberate 3-hit kill earns a
+   core. A population cap keeps a long no-timer match from accumulating
+   rocks forever.
 ===================================================================== */
 var GM_ASTEROID_CAP = 20;
-var gmAsteroids=[]; // [{x,y,vx,vy,size,r,color:'neutral',jag,spin,spinBase}, ...] -- same shape as Belt Blast's `asteroids` so drawAsteroid can render both unmodified
+var GM_ASTEROID_HITS_TO_KILL = 3;
+var gmAsteroids=[]; // [{x,y,vx,vy,size:'large',r,color:'neutral',jag,spin,spinBase,hits}, ...] -- same shape as Belt Blast's `asteroids` so drawAsteroid can render both unmodified
 
-function makeGravityMoonAsteroid(x,y,size){
+function makeGravityMoonAsteroid(x,y){
   var jag=[]; for(var j=0;j<9;j++) jag.push(rnd(0.78,1.15));
-  return {x:x, y:y, vx:rnd(-0.3,0.3), vy:rnd(1.0,1.8), size:size, r:BELT_SIZE_R[size], color:'neutral', jag:jag, spin:rnd(-0.0006,0.0006), spinBase:rnd(0,Math.PI*2)};
+  return {x:x, y:y, vx:rnd(-0.3,0.3), vy:rnd(1.0,1.8), size:'large', r:BELT_SIZE_R.large, color:'neutral', jag:jag, spin:rnd(-0.0006,0.0006), spinBase:rnd(0,Math.PI*2), hits:0};
 }
 function spawnGravityMoonAsteroidFromTop(){
   if(gmAsteroids.length>=GM_ASTEROID_CAP) return;
-  gmAsteroids.push(makeGravityMoonAsteroid(rnd(100,WW-100), -40, 'large'));
+  gmAsteroids.push(makeGravityMoonAsteroid(rnd(100,WW-100), -40));
 }
-function spawnGravityMoonAsteroidFragment(x,y,size){
-  if(gmAsteroids.length>=GM_ASTEROID_CAP) return;
-  gmAsteroids.push(makeGravityMoonAsteroid(x,y,size));
-}
-// Weapon hit: large -> 2 medium -> 2 small, matching breakAsteroid's cascade.
-// The smallest size is destroyed outright with NO replacement -- shooting
-// one down all the way is how a player actively reduces the hazard count.
-function breakGravityMoonAsteroid(ast){
+// A weapon hit counts toward the 3-hit kill. On the 3rd hit the asteroid
+// is destroyed, drops a core (if any color is still missing from play),
+// and is replaced by a fresh one from the top.
+function hitGravityMoonAsteroid(ast){
+  ast.hits = (ast.hits||0) + 1;
+  if(ast.hits < GM_ASTEROID_HITS_TO_KILL){
+    spawnBurst(ast.x, ast.y, '#c98a4b', 4);
+    return;
+  }
   var idx=gmAsteroids.indexOf(ast);
   if(idx===-1) return;
   gmAsteroids.splice(idx,1);
-  spawnBurst(ast.x, ast.y, '#c98a4b', 10);
-  if(ast.size==='large'){
-    spawnGravityMoonAsteroidFragment(ast.x-8, ast.y-8, 'medium');
-    spawnGravityMoonAsteroidFragment(ast.x+8, ast.y+8, 'medium');
-  } else if(ast.size==='medium'){
-    spawnGravityMoonAsteroidFragment(ast.x-6, ast.y-6, 'small');
-    spawnGravityMoonAsteroidFragment(ast.x+6, ast.y+6, 'small');
-  }
+  spawnBurst(ast.x, ast.y, '#c98a4b', 14);
+  gmSpawnCoreAt(ast.x, ast.y);
+  spawnGravityMoonAsteroidFromTop();
 }
 function updateGravityMoonAsteroids(dt){
   for(var i=gmAsteroids.length-1;i>=0;i--){
@@ -1070,19 +1045,18 @@ function updateGravityMoonAsteroids(dt){
       gmAsteroids.splice(i,1);
       spawnBurst(a.x, a.y, '#c98a4b', 16);
       sfxShipExplosion();
-      spawnGravityMoonAsteroidFromTop();
-      spawnGravityMoonAsteroidFromTop();
+      spawnGravityMoonAsteroidFromTop(); // steady-state replace, no core -- only a deliberate 3-hit kill earns one
     }
   }
 }
 
-// A ship touching the ground either lands safely (auto-collecting an
-// uncollected core pad it's over), takes crash damage on a moderate
-// impact, or is destroyed outright on a hard impact -- the same
-// environmental-kill shape as resolveAsteroids (alive=false, effects, no
-// kill credit/gem, respawn for bots / match end for the player via the
-// central win-check in update(dt)). Held cores return to their pads on
-// destruction, per the chosen "return to spawn" rule.
+// A ship touching the ground either lands safely, takes crash damage on
+// a moderate impact, or is destroyed outright on a hard impact -- the
+// same environmental-kill shape as resolveAsteroids (alive=false,
+// effects, no kill credit/gem, respawn for bots / match end for the
+// player via the central win-check in update(dt)). Core pickup is
+// handled separately (updateGravityMoonCorePickup) since it no longer
+// requires landing.
 function resolveGravityMoonGround(ent){
   ent.gmLanded=false;
   var groundY=gmTerrainHeightAt(ent.x);
@@ -1092,19 +1066,6 @@ function resolveGravityMoonGround(ent){
   if(impactSpeed <= GM_SAFE_LANDING_SPEED){
     ent.vy = 0;
     ent.gmLanded = true;
-    for(var i=0;i<gmCores.length;i++){
-      var core=gmCores[i];
-      if(Math.abs(ent.x-core.padX) >= GM_PAD_PICKUP_RADIUS) continue;
-      var alreadyHeld=false;
-      for(var h=0;h<ent.gmCoresHeld.length;h++){ if(ent.gmCoresHeld[h].id===core.id){ alreadyHeld=true; break; } }
-      if(alreadyHeld) continue; // one of each color max -- leave it for someone else
-      gmCores.splice(i,1); i--;
-      ent.gmCoresHeld.push(core);
-      var pad=gmPadFor(core.id);
-      if(pad) pad.cooldownTimer=GM_CORE_COOLDOWN_MS;
-      spawnGravityMoonAsteroidFromTop();
-      if(ent===player) showAlert(core.id.toUpperCase()+' CORE COLLECTED', 1800);
-    }
   } else if(impactSpeed <= GM_LETHAL_LANDING_SPEED){
     if(ent.alive && ent.invincible<=0){
       var over = impactSpeed - GM_SAFE_LANDING_SPEED;
@@ -1121,11 +1082,17 @@ function resolveGravityMoonGround(ent){
   }
 }
 
+// Any core the ship was holding drops right where it died (a fresh
+// floating pickup, immediately grabbable -- no cooldown), and the kill
+// itself also has a chance to produce a brand-new core if any color is
+// still missing from play -- "kill a ship to make a warp core appear."
 function destroyGravityMoonShip(ent){
   ent.alive=false;
   spawnBurst(ent.x,ent.y,ent.def.color,28);
   sfxShipExplosion();
-  gmReturnCoresToPads(ent);
+  for(var i=0;i<ent.gmCoresHeld.length;i++) gmCores.push(ent.gmCoresHeld[i]);
+  ent.gmCoresHeld=[];
+  gmSpawnCoreAt(ent.x, ent.y);
   if(!ent.isPlayer) ent.respawnTimer=rnd(3000,5000);
 }
 
@@ -1666,7 +1633,7 @@ function updateGasClouds(dt){
         if(gdA>c.range) continue;
         var gangA=angTo(c.x,c.y,gast3.x,gast3.y);
         if(Math.abs(angDiff(c.angle,gangA))>c.coneAngle/2) continue;
-        breakGravityMoonAsteroid(gast3);
+        hitGravityMoonAsteroid(gast3);
         sfxHit();
       }
     }
@@ -2943,7 +2910,7 @@ function getInstructionsContent(mode){
   if(mode==='gravitymoon'){
     return {
       title: 'GRAVITY MOON',
-      goal: 'A 3-way free-for-all against constant gravity. Point your nose away from the surface and thrust to resist it -- turning to fight stops your climb, and landing too hard destroys you. Land safely on one of 6 colored pads to claim its warp core (one of each color max -- a pad regenerates a fresh core about 15s after being taken); the more cores you hold, the better your ship maneuvers and the higher you can fly. Collect all 6 to win -- destroying a rival returns any cores they were carrying to their pads. Every core taken drops a hazard asteroid in from orbit: shoot one down to break it apart and clear it, or let it crash into the surface and it explodes into two more.',
+      goal: 'A 3-way free-for-all against constant gravity. Point your nose away from the surface and thrust to resist it -- turning to fight stops your climb, and landing too hard destroys you. No warp cores exist at the start -- earn them: 3 hits destroys an asteroid and has a chance to drop one of the 6 colors, and destroying a rival ship does too (and drops whatever they were carrying). Fly close to a floating core to grab it -- no landing required. The more cores you hold, the better your ship maneuvers and the higher you can fly. Collect all 6 distinct colors to win.',
       rewards: 'Win a Gravity Moon match and you earn $'+GALACTIC_BUCKS_PER_WIN+' Galactic Bucks -- a currency separate from your gem chest.',
       rewardsUse: 'Spend Galactic Bucks ($'+SPACE_STATION_UPGRADE_COST+' each) at the Space Station in the hangar on powerful one-battle upgrades for your next match: Destructo Missile, Extra Perma-Shield, Cloak, or a Deputy Drone.'
     };
@@ -3298,7 +3265,7 @@ function updateBeamWeapon(ent, dt){
       var gast2=gmAstSnapshot2[aj];
       if(gmAsteroids.indexOf(gast2)===-1) continue;
       if(distPointToSegment(gast2.x,gast2.y, ent.x,ent.y, ex,ey) > gast2.r+6) continue;
-      breakGravityMoonAsteroid(gast2);
+      hitGravityMoonAsteroid(gast2);
       sfxHit();
     }
   }
@@ -4179,16 +4146,18 @@ function startBeltBlastGame(){
 
 // Gravity Moon mode: solo-only 3-way FFA (player + 2 random bots) against
 // gravity and a jagged moon surface -- no rectangular obstacles or nebula
-// clouds, just open sky, the terrain, and the 6 core pads set into it.
-// Every ship starts high above the surface, nose already pointed straight
-// up.
+// clouds, just open sky and the terrain. No warp cores exist yet at the
+// start -- only 3 large asteroids drifting in from the top, each worth a
+// core once shot down. Every ship starts high above the surface, nose
+// already pointed straight up.
 function startGravityMoonGame(){
   obstacles=[]; // no rectangular obstacles in this mode -- just the terrain
   placeShieldStation();
   shieldStation.y = Math.min(shieldStation.y, GM_TERRAIN_MIN_Y-100); // keep it clear of even the tallest terrain peak
-  placeGravityMoonPads();
   generateGravityMoonTerrain();
-  gmAsteroids=[]; // fresh match -- no leftover hazards
+  gmCores=[]; // nothing to collect yet -- cores are earned, not pre-placed
+  gmAsteroids=[];
+  for(var i=0;i<3;i++) spawnGravityMoonAsteroidFromTop();
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
   asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
 
@@ -4413,12 +4382,14 @@ function updateHUD(){
   if(isGravityMoon){
     document.getElementById('gmCoresVal').textContent = player.gmCoresHeld.length+'/6';
     var dotsHtml='';
-    for(var gi=0;gi<gmPads.length;gi++){
-      var pad=gmPads[gi];
+    for(var gi=0;gi<GM_PAD_COLORS.length;gi++){
+      var colorDef=GM_PAD_COLORS[gi];
       var held=false;
-      for(var hh=0;hh<player.gmCoresHeld.length;hh++){ if(player.gmCoresHeld[hh].id===pad.id){ held=true; break; } }
-      var cls = held ? ' held' : (pad.cooldownTimer>0 ? ' cooling' : '');
-      dotsHtml += '<span class="gmCoreDot'+cls+'" style="background:'+pad.hex+';color:'+pad.hex+';"></span>';
+      for(var hh=0;hh<player.gmCoresHeld.length;hh++){ if(player.gmCoresHeld[hh].id===colorDef.id){ held=true; break; } }
+      var floating=false;
+      if(!held) for(var fi=0;fi<gmCores.length;fi++){ if(gmCores[fi].id===colorDef.id){ floating=true; break; } }
+      var cls = held ? ' held' : (floating ? ' available' : '');
+      dotsHtml += '<span class="gmCoreDot'+cls+'" style="background:'+colorDef.hex+';color:'+colorDef.hex+';"></span>';
     }
     document.getElementById('gmCoreDots').innerHTML = dotsHtml;
   }
@@ -4953,23 +4924,31 @@ function updateBotAI_BeltBlast(b, dt){
   if(sp4>maxSp4){ b.vx=b.vx/sp4*maxSp4; b.vy=b.vy/sp4*maxSp4; }
 }
 
-// Gravity Moon bot AI's goal selection: nearest still-uncollected core pad
-// (by horizontal distance, since every pad sits on the same ground line).
-function gmNearestUncollectedPad(b){
+// Gravity Moon bot AI's goal selection: nearest floating, uncollected core.
+function gmNearestCore(b){
   var best=null, bestD=Infinity;
   for(var i=0;i<gmCores.length;i++){
     var core=gmCores[i];
-    var alreadyHeld=false;
-    for(var h=0;h<b.gmCoresHeld.length;h++){ if(b.gmCoresHeld[h].id===core.id){ alreadyHeld=true; break; } }
-    if(alreadyHeld) continue; // already holds this color -- don't waste time re-chasing a duplicate
-    var d=Math.abs(b.x-core.padX);
+    var d=dst(b.x,b.y,core.x,core.y);
     if(d<bestD){ bestD=d; best=core; }
   }
   return best;
 }
-// Once every pad is claimed, the goal shifts to whichever living ship (bot
-// or player) is holding the most cores -- destroying them returns their
-// cores to their pads for the taking.
+// No core in the world right now -- go farm the nearest asteroid (3 hits
+// kills it and has a chance to produce one).
+function gmNearestAsteroid(b){
+  var best=null, bestD=Infinity;
+  for(var i=0;i<gmAsteroids.length;i++){
+    var a=gmAsteroids[i];
+    var d=dst(b.x,b.y,a.x,a.y);
+    if(d<bestD){ bestD=d; best=a; }
+  }
+  return best;
+}
+// Last resort (no core, no asteroid -- shouldn't really happen since
+// asteroids always replace themselves) -- hunt whichever living ship is
+// holding the most cores, since destroying them drops their cores back
+// into the world.
 function gmMostCoresShip(excludeEnt){
   var all=allShips(), best=null, bestCount=0;
   for(var i=0;i<all.length;i++){
@@ -4983,16 +4962,15 @@ function gmMostCoresShip(excludeEnt){
 // Gravity Moon bot AI. Priority chain:
 // 1) Survival override -- falling fast and getting close to the ground
 //    overrides everything: point straight up and thrust.
-// 2) Otherwise pick a goal -- nearest uncollected pad, or (once all 6 are
-//    claimed) the ship holding the most cores.
+// 2) Otherwise pick a goal -- nearest floating core, else the nearest
+//    asteroid to farm for one, else (nothing else to do) hunt whoever
+//    holds the most cores.
 // 3) Blend steering between "toward the goal" and "straight up" by how
 //    urgently the bot is falling -- the same nose-up-vs-turn-to-act
 //    tension the player faces.
 // 4) Take an opportunistic defensive shot at a nearby enemy without
-//    abandoning the goal, unless the goal IS hunting that enemy, in which
-//    case turn in properly to engage.
-// 5) Near a target pad, only thrust once falling faster than a gentle
-//    descent rate, so bots actually attempt soft landings.
+//    abandoning the goal; engage properly if the goal IS hunting that
+//    enemy, or fire at the target asteroid while farming it.
 function updateBotAI_GravityMoon(b, dt){
   b.aiDecisionTimer -= dt;
   b.thrusting=false;
@@ -5017,20 +4995,27 @@ function updateBotAI_GravityMoon(b, dt){
     return;
   }
 
-  var pad = gmNearestUncollectedPad(b);
+  var core = gmNearestCore(b);
+  var farmAsteroid = null;
   var huntTarget = null;
   var goalAngle;
-  if(pad){
+  if(core){
     b.aiState='collect';
-    goalAngle = angTo(b.x, b.y, pad.padX, pad.padY-40);
+    goalAngle = angTo(b.x, b.y, core.x, core.y);
   } else {
-    huntTarget = gmMostCoresShip(b);
-    if(huntTarget){
-      b.aiState='hunt';
-      goalAngle = angTo(b.x, b.y, huntTarget.x, huntTarget.y);
+    farmAsteroid = gmNearestAsteroid(b);
+    if(farmAsteroid){
+      b.aiState='farm';
+      goalAngle = angTo(b.x, b.y, farmAsteroid.x, farmAsteroid.y);
     } else {
-      b.aiState='scout';
-      goalAngle = upAngle; // nothing left to do -- just hold altitude
+      huntTarget = gmMostCoresShip(b);
+      if(huntTarget){
+        b.aiState='hunt';
+        goalAngle = angTo(b.x, b.y, huntTarget.x, huntTarget.y);
+      } else {
+        b.aiState='scout';
+        goalAngle = upAngle; // nothing left to do -- just hold altitude
+      }
     }
   }
 
@@ -5047,9 +5032,7 @@ function updateBotAI_GravityMoon(b, dt){
     b.angle += daS*0.10;
   }
 
-  var nearPadHorizontally = pad && Math.abs(b.x-pad.padX) < 140;
-  var wantsThrust = !nearPadHorizontally || b.vy > GM_SAFE_LANDING_SPEED*0.7;
-  if(wantsThrust && Math.abs(angDiff(b.angle, upAngle)) < Math.PI*0.7){
+  if(Math.abs(angDiff(b.angle, upAngle)) < Math.PI*0.7){
     b.vx += Math.cos(b.angle)*0.14*maneuverMul; b.vy += Math.sin(b.angle)*0.14*maneuverMul;
     b.thrusting=true;
   }
@@ -5068,6 +5051,13 @@ function updateBotAI_GravityMoon(b, dt){
     }
     if(b.abilityCharge>0 && Math.random()<0.006 && dHunt<420){
       triggerAbilityFor(b);
+    }
+  } else if(farmAsteroid){
+    var dFarm=dst(b.x,b.y,farmAsteroid.x,farmAsteroid.y);
+    var angleToFarm=angTo(b.x,b.y,farmAsteroid.x,farmAsteroid.y);
+    if(b.cooldown<=0 && dFarm<400 && Math.abs(angDiff(b.angle,angleToFarm))<0.5 && b.ammo>0){
+      beginFire(b, angleToFarm);
+      b.ammo--; b.cooldown=b.def.fireRate*1.5; b.idleTimer=0;
     }
   }
 }
@@ -5410,7 +5400,7 @@ function updateBullets(dt){
         var gast=gmAstSnapshot[ai];
         if(gmAsteroids.indexOf(gast)===-1) continue;
         if(dst(bl.x,bl.y,gast.x,gast.y) < gast.r+bl.size){
-          breakGravityMoonAsteroid(gast);
+          hitGravityMoonAsteroid(gast);
           sfxHit();
           if(!bl.piercing) removed=true;
           break;
@@ -5587,7 +5577,7 @@ function update(dt){
   updateGems(dt);
   if(gameMode==='warpcore') updateWarpCores(dt);
   if(gameMode==='beltblast') updateAsteroids(dt);
-  if(gameMode==='gravitymoon'){ updateGravityMoonPads(dt); updateGravityMoonAsteroids(dt); }
+  if(gameMode==='gravitymoon'){ updateGravityMoonAsteroids(dt); updateGravityMoonCorePickup(); }
   updateShieldStation(dt);
   updateTractorPull(dt);
   updateIdleRegen(dt);
@@ -5846,10 +5836,7 @@ function drawAsteroid(a){
 }
 
 // Gravity Moon: a jagged vector-line moon surface (classic Lunar Lander
-// terrain) rendered in the game's own cyan palette, with each of the 6
-// core pads drawn as a flat tick-marked landing shelf set into it --
-// lit with its color while its core still waits there, dimmed once a
-// ship is carrying it away.
+// terrain) rendered in the game's own cyan palette.
 function drawGravityMoonGround(){
   if(gmTerrain.length<2) return;
   ctx.save();
@@ -5870,27 +5857,27 @@ function drawGravityMoonGround(){
   ctx.stroke();
   ctx.shadowBlur=0;
   ctx.restore();
+}
 
+// Gravity Moon: each earned, uncollected core floats in open space right
+// where it was produced (a destroyed asteroid or a ship's death site) --
+// a gently pulsing glowing orb in its own color, grabbable by proximity.
+function drawGravityMoonCores(){
+  var pulse = 0.75 + Math.sin(performance.now()*0.005)*0.25;
   for(var i=0;i<gmCores.length;i++){
     var core=gmCores[i];
     ctx.save();
-    ctx.translate(core.padX, core.padY);
-    ctx.strokeStyle=core.hex;
-    ctx.shadowColor=core.hex; ctx.shadowBlur = core.carriedBy ? 0 : 8;
-    ctx.lineWidth=2.5;
-    ctx.beginPath(); ctx.moveTo(-45,0); ctx.lineTo(45,0); ctx.stroke();
+    ctx.translate(core.x, core.y);
+    ctx.shadowColor=core.hex; ctx.shadowBlur=10*pulse;
+    ctx.beginPath();
+    ctx.arc(0,0,9,0,Math.PI*2);
+    ctx.fillStyle=core.hex;
+    ctx.globalAlpha=pulse;
+    ctx.fill();
+    ctx.globalAlpha=1;
+    ctx.strokeStyle='rgba(255,255,255,0.8)';
     ctx.lineWidth=1.5;
-    for(var t=-30;t<=30;t+=15){ ctx.beginPath(); ctx.moveTo(t,0); ctx.lineTo(t-6,8); ctx.stroke(); }
-    if(!core.carriedBy){
-      ctx.shadowBlur=6;
-      ctx.beginPath();
-      ctx.arc(0,-20,10,0,Math.PI*2);
-      ctx.fillStyle=core.hex;
-      ctx.fill();
-      ctx.strokeStyle='rgba(255,255,255,0.75)';
-      ctx.lineWidth=1.5;
-      ctx.stroke();
-    }
+    ctx.stroke();
     ctx.restore();
   }
 }
@@ -5928,6 +5915,7 @@ function drawWorld(){
   }
 
   for(var i=0;i<gems.length;i++) drawGem(gems[i]);
+  if(gameMode==='gravitymoon') drawGravityMoonCores();
   for(var i=0;i<turrets.length;i++){ if(turrets[i].alive) drawTurret(turrets[i]); }
 
   for(var i=0;i<particles.length;i++){
@@ -6110,7 +6098,7 @@ function drawMinimap(){
     for(var i=0;i<gmCores.length;i++){
       var core=gmCores[i];
       mx.fillStyle=core.hex;
-      mx.beginPath(); mx.arc(core.padX*scaleX,core.padY*scaleY,2,0,Math.PI*2); mx.fill();
+      mx.beginPath(); mx.arc(core.x*scaleX,core.y*scaleY,2.5,0,Math.PI*2); mx.fill();
     }
     for(var i=0;i<gmAsteroids.length;i++){
       var ga=gmAsteroids[i];
