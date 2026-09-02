@@ -34,6 +34,9 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 #shieldFill{height:100%;background:#00d4ff;border-radius:4px;transition:width 0.2s,background 0.3s;}
 #shieldFill.teamB{background:#ff4444;}
 #shieldFill.danger{background:#ff4444;animation:blink 0.7s ease-in-out infinite;}
+#fuelBar{width:120px;height:8px;background:rgba(255,176,32,0.15);border-radius:4px;border:1px solid rgba(255,176,32,0.3);overflow:hidden;margin-top:3px;}
+#fuelFill{height:100%;background:#ffb020;border-radius:4px;transition:width 0.2s,background 0.3s;}
+#fuelFill.danger{background:#ff4444;animation:blink 0.7s ease-in-out infinite;}
 #bonusShieldBar{width:120px;height:5px;background:rgba(255,176,32,0.12);border-radius:3px;border:1px solid rgba(255,176,32,0.35);overflow:hidden;margin-top:3px;}
 #bonusShieldFill{height:100%;background:#ffb020;border-radius:3px;transition:width 0.2s;}
 
@@ -252,6 +255,8 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
     <div id="shieldBar"><div id="shieldFill" style="width:100%"></div></div>
     <div id="bonusShieldBar" style="display:none;"><div id="bonusShieldFill" style="width:100%"></div></div>
     <div id="cloakStatus" style="display:none;font-size:9px;letter-spacing:2px;color:#b060ff;text-shadow:0 0 8px rgba(176,96,255,0.7);margin-top:4px;">CLOAKED</div>
+    <div class="hud-lbl" id="fuelLbl" style="margin-top:6px;display:none;">FUEL</div>
+    <div id="fuelBar" style="display:none;"><div id="fuelFill" style="width:100%"></div></div>
     <div class="hud-lbl" style="margin-top:6px;">SHIP</div>
     <div class="hud-val" id="shipNameVal" style="font-size:13px;">-</div>
     <div class="hud-lbl" id="gemLbl" style="margin-top:6px;">GEMS</div>
@@ -4362,13 +4367,31 @@ function startSmugglersRunGame(){
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
   asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
   gmCores=[]; gmAsteroids=[]; // clear any leftover Gravity Moon match state (pads/cores/asteroids are drawn unconditionally)
-  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; srSellStation=null;
-  srCheckpoints=[]; srCurrentCheckpoint=null; srFuel=SR_FUEL_MAX; srFuelStations=[]; srRespawnTimer=0;
-  // STAGE 1 (mode plumbing): no hazards/bosses/checkpoints exist yet, so the
-  // run starts directly in a scrolling phase rather than the eventual
-  // opening-mothership phase, purely so the auto-scroll camera is visible
-  // and testable in isolation. Later build stages will change this default
-  // back to 'mothership1' once the opening boss fight actually exists.
+  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; srSellStation={x:SR_WW/2, y:100};
+  srCurrentCheckpoint=null; srFuel=SR_FUEL_MAX; srRespawnTimer=0;
+  // One checkpoint per hazard section, reached the instant that section's
+  // boss dies (wired up in later build stages) -- these y positions divide
+  // the run into 4 roughly-even legs (opening -> belt -> turrets -> brigade
+  // -> final), my own sensible defaults, easy to retune once real hazard
+  // content exists to pace against.
+  srCheckpoints=[
+    {name:'Asteroid Belt Cleared', y:SR_WH-4200, phase:'chaseTurrets', reached:false},
+    {name:'Turret Gauntlet Cleared', y:SR_WH-8400, phase:'chaseBrigade', reached:false},
+    {name:'Pirate Brigade Cleared', y:SR_WH-12600, phase:'finalMothership', reached:false}
+  ];
+  // A guaranteed refill at every checkpoint plus one extra roughly midway
+  // through each section, so no single leg is longer than the tank allows.
+  srFuelStations=[
+    {x:SR_WW/2, y:SR_WH-2100}, {x:SR_WW/2, y:srCheckpoints[0].y},
+    {x:SR_WW/2, y:SR_WH-6300}, {x:SR_WW/2, y:srCheckpoints[1].y},
+    {x:SR_WW/2, y:SR_WH-10500}, {x:SR_WW/2, y:srCheckpoints[2].y}
+  ];
+  // STAGE 1-2 (mode plumbing + checkpoints/fuel): no bosses/hazards exist
+  // yet to actually trigger a checkpoint, so the run starts directly in a
+  // scrolling phase rather than the eventual opening-mothership phase,
+  // purely so the auto-scroll camera and fuel drain are visible/testable in
+  // isolation. Later build stages will change this default back to
+  // 'mothership1' once the opening boss fight actually exists.
   srPhase='chaseAsteroids';
   srScrollY=SR_WH-200;
 
@@ -4596,6 +4619,14 @@ function updateHUD(){
       dotsHtml += '<span class="gmCoreDot'+cls+'" style="background:'+colorDef.hex+';color:'+colorDef.hex+';"></span>';
     }
     document.getElementById('gmCoreDots').innerHTML = dotsHtml;
+  }
+  document.getElementById('fuelLbl').style.display = isSmugglersRun ? '' : 'none';
+  document.getElementById('fuelBar').style.display = isSmugglersRun ? '' : 'none';
+  if(isSmugglersRun){
+    var fuelPct=clamp(srFuel/SR_FUEL_MAX,0,1);
+    var fuelFill=document.getElementById('fuelFill');
+    fuelFill.style.width=(fuelPct*100)+'%';
+    fuelFill.className = srFuel<=SR_FUEL_MAX*0.2 ? 'danger' : '';
   }
 
   // Ammo pips: filled dot per available shot, empty outline per spent shot
@@ -5668,11 +5699,28 @@ var srRespawnTimer=0; // counts down after a death, before smugglersRunRespawn()
 function updateSmugglersRun(dt){
   if(player.alive){
     if(SR_SCROLLING_PHASES[srPhase]) srScrollY -= SR_SCROLL_PX_PER_MS*dt;
-    if(player.y > srScrollY+SR_FALLBEHIND_MARGIN) destroySmugglersRunShip(player, 'fell behind');
+    if(player.y > srScrollY+SR_FALLBEHIND_MARGIN){ destroySmugglersRunShip(player, 'fell behind'); return; }
+    srFuel -= SR_FUEL_DRAIN_PER_MS*dt; // drains everywhere, boss fights included -- constant pressure
+    for(var i=0;i<srFuelStations.length;i++){
+      if(dst(player.x,player.y,srFuelStations[i].x,srFuelStations[i].y) < SR_FUEL_REFILL_RADIUS){ srFuel=SR_FUEL_MAX; break; }
+    }
+    if(srFuel<=0) destroySmugglersRunShip(player, 'out of fuel'); // treated exactly like a combat death -- one respawn path for the whole mode
     return;
   }
   srRespawnTimer -= dt;
   if(srRespawnTimer<=0) smugglersRunRespawn();
+}
+// Called the instant a mid-run boss dies (wired up as each boss section
+// lands in later build stages). Marks the checkpoint reached, moves the
+// respawn point forward to it, and guarantees a full fuel refill -- the
+// same guaranteed-refill behavior a fuel station gives, so clearing a
+// section never leaves you stranded right after the fight it took to get there.
+function srReachCheckpoint(idx){
+  var cp=srCheckpoints[idx];
+  if(!cp || cp.reached) return;
+  cp.reached=true;
+  srCurrentCheckpoint={y:cp.y, phase:cp.phase};
+  srFuel=SR_FUEL_MAX;
 }
 // Shared death handling for every Smuggler's Run failure state (combat,
 // falling behind the scroll, zero fuel) -- one respawn/checkpoint path for
@@ -5705,6 +5753,7 @@ function smugglersRunRespawn(){
   player.hp=player.maxHp; player.alive=true; player.invincible=1500;
   srScrollY=y;
   srPhase=phase;
+  srFuel=SR_FUEL_MAX; // must refill here -- otherwise a zero-fuel death respawns straight into another zero-fuel death next frame
 }
 
 /* =====================================================================
