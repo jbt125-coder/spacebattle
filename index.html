@@ -3730,6 +3730,11 @@ var guestChosenLevels=null;   // host-only: guest's own upgrade levels for that 
 var guestReadyToLaunch=false; // host-only: guest has chosen a ship and can be launched with
 var guestMatchEnded=false;    // guest-only: guard so matchEnd/death only end the guest's screen once
 var joinRoomId=null;          // guest-only: the ?join= room id from the URL, if any
+var hostSnapshotSeq=0;        // host-only: increments every snapshot sent, so the guest can drop a
+                               // stale one that arrives out of order (the connection is unordered --
+                               // see netConn=netPeer.connect below -- to avoid a lost packet blocking
+                               // every packet behind it)
+var lastAppliedSnapshotSeq=-1; // guest-only: highest seq applied so far
 
 function shipDefById(id){
   for(var i=0;i<SHIPS.length;i++) if(SHIPS[i].id===id) return SHIPS[i];
@@ -3746,6 +3751,7 @@ function hostCreateInvite(){
   linkRow.style.display='none';
   document.getElementById('inviteLinkInput').value='';
   statusEl.textContent='Connecting to matchmaking service...';
+  hostSnapshotSeq=0;
 
   if(typeof Peer==='undefined'){
     statusEl.textContent='Multiplayer needs an internet connection to set up (couldn\'t load the connection library).';
@@ -3842,6 +3848,7 @@ function hostNetworkTick(dt){
 
   netSend({
     type:'snapshot',
+    seq: ++hostSnapshotSeq,
     me: remotePlayer ? serializeShip(remotePlayer) : null,
     others: others,
     bullets: bullets.map(function(b){ return {x:b.x,y:b.y,vx:b.vx,vy:b.vy,color:b.color,size:b.size}; }),
@@ -3864,13 +3871,19 @@ function guestBeginConnect(){
     return;
   }
   netRole='guest';
+  lastAppliedSnapshotSeq=-1;
   statusEl.textContent='Connecting...';
   try{ netPeer=new Peer(); }catch(e){
     statusEl.textContent='Could not start a connection in this browser.';
     return;
   }
   netPeer.on('open', function(){
-    netConn=netPeer.connect(joinRoomId, {reliable:true});
+    // reliable:false -> PeerJS opens an UNORDERED channel (still guaranteed
+    // delivery, just not sequential -- see hostSnapshotSeq/applyGuestSnapshot).
+    // A lost/delayed packet no longer blocks every packet behind it from
+    // being delivered, which is what caused the freeze-then-jump lag spikes
+    // the old ordered:true channel produced under any packet loss.
+    netConn=netPeer.connect(joinRoomId, {reliable:false});
     netConn.on('open', function(){
       statusEl.textContent='Connected! Pick your ship below.';
       document.getElementById('joinScreen').style.display='none';
@@ -3967,6 +3980,14 @@ function startGuestMatch(msg){
 }
 function applyGuestSnapshot(msg){
   if(!gameActive || !msg.me) return;
+  // The channel is unordered (see guestBeginConnect), so a snapshot can
+  // arrive after a newer one already landed -- applying it would rubber-band
+  // every ship backward for a frame. Drop anything not newer than what's
+  // already been applied.
+  if(typeof msg.seq==='number'){
+    if(msg.seq<=lastAppliedSnapshotSeq) return;
+    lastAppliedSnapshotSeq=msg.seq;
+  }
   var wasAlive=player.alive;
 
   // Position/angle are otherwise owned by this device's own client-side
