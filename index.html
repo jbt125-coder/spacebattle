@@ -278,6 +278,9 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
     <div class="hud-lbl" id="gmCoresLbl" style="margin-top:6px;display:none;">CORES</div>
     <div class="hud-val" id="gmCoresVal" style="font-size:14px;color:#00d4ff;text-shadow:0 0 10px rgba(0,212,255,0.6);display:none;">0/6</div>
     <div id="gmCoreDots" style="display:none;margin-top:4px;"></div>
+    <div class="hud-lbl" id="srCoresLbl" style="margin-top:6px;display:none;">CORES</div>
+    <div class="hud-val" id="srCoresVal" style="font-size:14px;color:#00d4ff;text-shadow:0 0 10px rgba(0,212,255,0.6);display:none;">0/6</div>
+    <div id="srCoreDots" style="display:none;margin-top:4px;"></div>
   </div>
 </div>
 
@@ -4628,6 +4631,18 @@ function updateHUD(){
     fuelFill.style.width=(fuelPct*100)+'%';
     fuelFill.className = srFuel<=SR_FUEL_MAX*0.2 ? 'danger' : '';
   }
+  document.getElementById('srCoresLbl').style.display = isSmugglersRun ? '' : 'none';
+  document.getElementById('srCoresVal').style.display = isSmugglersRun ? '' : 'none';
+  document.getElementById('srCoreDots').style.display = isSmugglersRun ? '' : 'none';
+  if(isSmugglersRun){
+    document.getElementById('srCoresVal').textContent = player.carryingCores.length+'/6';
+    var srDotsHtml='';
+    for(var sdi=0;sdi<6;sdi++){
+      var srHeld = sdi<player.carryingCores.length;
+      srDotsHtml += '<span class="gmCoreDot'+(srHeld?' held':'')+'" style="background:#ffb020;color:#ffb020;"></span>';
+    }
+    document.getElementById('srCoreDots').innerHTML = srDotsHtml;
+  }
 
   // Ammo pips: filled dot per available shot, empty outline per spent shot
   var ammoEl=document.getElementById('ammoVal');
@@ -5704,11 +5719,29 @@ function updateSmugglersRun(dt){
     for(var i=0;i<srFuelStations.length;i++){
       if(dst(player.x,player.y,srFuelStations[i].x,srFuelStations[i].y) < SR_FUEL_REFILL_RADIUS){ srFuel=SR_FUEL_MAX; break; }
     }
-    if(srFuel<=0) destroySmugglersRunShip(player, 'out of fuel'); // treated exactly like a combat death -- one respawn path for the whole mode
+    if(srFuel<=0){ destroySmugglersRunShip(player, 'out of fuel'); return; } // treated exactly like a combat death -- one respawn path for the whole mode
+    updateSmugglersRunCores();
     return;
   }
   srRespawnTimer -= dt;
   if(srRespawnTimer<=0) smugglersRunRespawn();
+}
+// Open-air pickup, same convention as Warp Core's updateWarpCores: fly
+// within range and an uncollected core joins carryingCores automatically.
+// No delivery step here -- unlike Warp Core, cores are simply held until
+// the final sell-station cash-out (a later build stage). Player-only --
+// there are no other real ships to compete for cores against in this solo
+// mode (the smuggler NPC "holds" the 6th one narratively, not mechanically,
+// until it's dropped at the final boss's death).
+function updateSmugglersRunCores(){
+  for(var i=0;i<srCores.length;i++){
+    var c=srCores[i];
+    if(c.sold || c.carriedBy) continue;
+    if(dst(player.x,player.y,c.x,c.y) < player.r+14){
+      c.carriedBy=player;
+      player.carryingCores.push(c);
+    }
+  }
 }
 // Called the instant a mid-run boss dies (wired up as each boss section
 // lands in later build stages). Marks the checkpoint reached, moves the
