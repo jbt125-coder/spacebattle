@@ -775,14 +775,18 @@ function gravityMoonSpawnPoint(){
 ===================================================================== */
 var SR_WW=1400, SR_WH=16000;
 var SR_SCROLL_PX_PER_MS=0.12;    // forced forward speed during chase phases
-var SR_FALLBEHIND_MARGIN=260;    // px the player may lag behind srScrollY before it's fatal
+var SR_FALLBEHIND_MARGIN=260;    // px the player may lag behind srScrollY before the red fog (below) starts biting
+var SR_FOG_DPS=22;                // hp/sec drained while inside the red fog
 var SR_AHEAD_MARGIN=450;         // px the player may race ahead of srScrollY -- a soft wall, not fatal (see updateSmugglersRun)
 var SR_FUEL_MAX=100, SR_FUEL_DRAIN_PER_MS=100/90000, SR_FUEL_REFILL_RADIUS=60;
 var SR_BOSS_HP_MULT=8, SR_BOSS_SCALE=1.4;               // opening + 3 mid-run bosses
 var SR_FINAL_BOSS_HP_MULT=12, SR_FINAL_BOSS_SCALE=1.6;  // final boss, matches the smuggler
 var SR_BRIGADE_SHIP_HP=18;       // pirate swarm grunts -- dies in 1-3 hits from most weapons
 var SR_BRIGADE_BOSS_HP_MULT=5, SR_BRIGADE_BOSS_SCALE=1.15; // pirate brigade's own mothership -- roughly 15 hits, smaller than the main bosses
+var SR_BRIGADE_WAVE_COUNT=3, SR_BRIGADE_WAVE_COLS=4, SR_BRIGADE_WAVE_ROWS=2; // 3 waves of 8 -- keep coming until every one is cleared
+var SR_BRIGADE_GEM_CHANCE=0.30, SR_BRIGADE_CORE_CHANCE=0.05; // rolled on each pirate's death, same cap-at-6 rule as asteroid drops
 var SR_GALACTIC_BUCKS_PER_CORE=3; // all 6 required to sell: $18 total
+var SR_SHIELD_STATION_RADIUS=70, SR_SHIELD_FILL_MS=6000, SR_SHIELD_COOLDOWN_MS=15000; // 6 segments over 6s, then a 15s yellow cooldown
 
 function smugglersRunSpawnPoint(){
   return {x:SR_WW/2, y:SR_WH-200};
@@ -802,7 +806,9 @@ var srBrigadeWave=[];
 var srSmuggler=null;          // deliberately NOT in bots[] -- structurally unhittable, pure visual lure
 var srSmugglerShipDef=null;   // the roster ship srSmuggler is flying -- the final mothership (a later stage) reuses this exact type
 var srCollectCoresTimer=0;    // counts down during 'collectCores'; phase advances on all-5-collected or this hitting 0, whichever first
+var srBrigadeWaveIndex=0;     // how many pirate brigade waves have been fully cleared so far this attempt at the section
 var srSellStation=null;
+var srShieldStations=[];      // {x,y,fillTimer,state:'ready'|'cooldown',cooldownTimer} -- scattered HP-regen stations, see updateSmugglersRunShieldStations
 
 function resize(){
   VW=canvas.width=window.innerWidth;
@@ -4055,7 +4061,7 @@ function startGuestMatch(msg){
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
   asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
   gmCores=[]; gmAsteroids=[]; // clear any leftover Gravity Moon match state (pads/cores/asteroids are drawn unconditionally, and asteroids would physically collide with ships if left over)
-  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; // clear any leftover Smuggler's Run match state (cores/asteroids/brigade are drawn unconditionally)
+  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; srFuelStations=[]; srShieldStations=[]; // clear any leftover Smuggler's Run match state (cores/asteroids/brigade/fuel/shield stations are drawn unconditionally)
 
   player=makeShipEntity(selectedShip, WW/2, WH/2, true);
   player.eff=effectiveStatsFromLevels(selectedShip, getShipProgress(selectedShip.id));
@@ -4189,7 +4195,7 @@ function startGame(){
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
   asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
   gmCores=[]; gmAsteroids=[]; // clear any leftover Gravity Moon match state (pads/cores/asteroids are drawn unconditionally, and asteroids would physically collide with ships if left over)
-  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; // clear any leftover Smuggler's Run match state (cores/asteroids/brigade are drawn unconditionally)
+  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; srFuelStations=[]; srShieldStations=[]; // clear any leftover Smuggler's Run match state (cores/asteroids/brigade/fuel/shield stations are drawn unconditionally)
   gemsCollectedThisMatch=0;
   remotePlayer=null;
   if(!netRole) applyPendingUpgrade(player); // Space Station upgrades are solo-only (after array resets so a spawned Deputy Drone survives)
@@ -4243,7 +4249,7 @@ function startWarpCoreGame(){
   placeWarpCores();
   asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
   gmCores=[]; gmAsteroids=[]; // clear any leftover Gravity Moon match state (pads/cores/asteroids are drawn unconditionally, and asteroids would physically collide with ships if left over)
-  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; // clear any leftover Smuggler's Run match state (cores/asteroids/brigade are drawn unconditionally)
+  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; srFuelStations=[]; srShieldStations=[]; // clear any leftover Smuggler's Run match state (cores/asteroids/brigade/fuel/shield stations are drawn unconditionally)
 
   var pSpawn=teamSpawnPoint('A');
   player=makeShipEntity(selectedShip, pSpawn.x, pSpawn.y, true);
@@ -4304,7 +4310,7 @@ function startBeltBlastGame(){
   placeAsteroids();
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
   gmCores=[]; gmAsteroids=[]; // clear any leftover Gravity Moon match state (pads/cores/asteroids are drawn unconditionally, and asteroids would physically collide with ships if left over)
-  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; // clear any leftover Smuggler's Run match state (cores/asteroids/brigade are drawn unconditionally)
+  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; srFuelStations=[]; srShieldStations=[]; // clear any leftover Smuggler's Run match state (cores/asteroids/brigade/fuel/shield stations are drawn unconditionally)
 
   var pSpawn=teamSpawnPoint('A');
   player=makeShipEntity(selectedShip, pSpawn.x, pSpawn.y, true);
@@ -4366,7 +4372,7 @@ function startGravityMoonGame(){
   for(var i=0;i<3;i++) spawnGravityMoonAsteroidFromTop();
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
   asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
-  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; // clear any leftover Smuggler's Run match state (cores/asteroids/brigade are drawn unconditionally)
+  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; srFuelStations=[]; srShieldStations=[]; // clear any leftover Smuggler's Run match state (cores/asteroids/brigade/fuel/shield stations are drawn unconditionally)
 
   var pSpawn=gravityMoonSpawnPoint();
   player=makeShipEntity(selectedShip, pSpawn.x, pSpawn.y, true);
@@ -4411,7 +4417,7 @@ function startSmugglersRunGame(){
   asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
   gmCores=[]; gmAsteroids=[]; // clear any leftover Gravity Moon match state (pads/cores/asteroids are drawn unconditionally)
   srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; srSmugglerShipDef=null; srSellStation={x:SR_WW/2, y:100};
-  srCurrentCheckpoint=null; srFuel=SR_FUEL_MAX; srRespawnTimer=0; srCollectCoresTimer=0;
+  srCurrentCheckpoint=null; srFuel=SR_FUEL_MAX; srRespawnTimer=0; srCollectCoresTimer=0; srBrigadeWaveIndex=0;
   // One checkpoint per hazard section, reached the instant that section's
   // boss dies (wired up in later build stages) -- these y positions divide
   // the run into 4 roughly-even legs (opening -> belt -> turrets -> brigade
@@ -4428,6 +4434,16 @@ function startSmugglersRunGame(){
     {x:SR_WW/2, y:SR_WH-2100}, {x:SR_WW/2, y:srCheckpoints[0].y},
     {x:SR_WW/2, y:SR_WH-6300}, {x:SR_WW/2, y:srCheckpoints[1].y},
     {x:SR_WW/2, y:SR_WH-10500}, {x:SR_WW/2, y:srCheckpoints[2].y}
+  ];
+  // Scattered off the lane center (fuel/sell stations sit at x=SR_WW/2) so
+  // players have a reason to explore the width of the lane, one per hazard
+  // section plus one near the opening.
+  srShieldStations=[
+    {x:SR_WW*0.25, y:SR_WH-1300, fillTimer:0, state:'ready', cooldownTimer:0},
+    {x:SR_WW*0.75, y:SR_WH-3000, fillTimer:0, state:'ready', cooldownTimer:0},
+    {x:SR_WW*0.25, y:SR_WH-7000, fillTimer:0, state:'ready', cooldownTimer:0},
+    {x:SR_WW*0.75, y:SR_WH-9800, fillTimer:0, state:'ready', cooldownTimer:0},
+    {x:SR_WW*0.25, y:SR_WH-11500, fillTimer:0, state:'ready', cooldownTimer:0}
   ];
   srPhase='mothership1';
   srScrollY=SR_WH-200;
@@ -5795,9 +5811,17 @@ function updateSmugglersRun(dt){
   // mid-respawn-delay, and the phase needs to advance the instant that
   // happens rather than waiting for the player to be back in control.
   updateSmugglersRunPhaseTransitions(dt);
+  updateSmugglersRunShieldStations(dt); // cooldowns tick even during the post-death respawn delay
   if(player.alive){
     if(SR_SCROLLING_PHASES[srPhase]) srScrollY -= SR_SCROLL_PX_PER_MS*dt;
-    if(player.y > srScrollY+SR_FALLBEHIND_MARGIN){ destroySmugglersRunShip(player, 'fell behind'); return; }
+    // Red fog, not an invisible wall -- its leading edge trails srScrollY by
+    // SR_FALLBEHIND_MARGIN and is drawn (drawSmugglersRunFog) so the player
+    // can actually see it coming and get out ahead of it, rather than dying
+    // instantly and invisibly the moment they cross an unmarked line.
+    if(player.y > srScrollY+SR_FALLBEHIND_MARGIN){
+      player.hp -= SR_FOG_DPS*(dt/1000);
+      if(player.hp<=0){ destroySmugglersRunShip(player, 'caught in the fog'); return; }
+    }
     // Soft wall on the OTHER side -- without this the player can thrust
     // straight through the top of the screen and keep going indefinitely,
     // especially during a frozen phase (mothership1/collectCores/any boss
@@ -5818,6 +5842,30 @@ function updateSmugglersRun(dt){
   }
   srRespawnTimer -= dt;
   if(srRespawnTimer<=0) smugglersRunRespawn();
+}
+// Scattered HP-regen stations: sit in one's radius for SR_SHIELD_FILL_MS
+// (6s) to walk its 6-segment green ring up to full while it heals the
+// player, then it flips to a yellow cooldown state -- unusable for
+// SR_SHIELD_COOLDOWN_MS (15s) -- before resetting back to green/empty and
+// ready again. Cooldowns tick every frame regardless of player state; the
+// fill/heal only progresses while the player is alive and in range.
+function updateSmugglersRunShieldStations(dt){
+  for(var i=0;i<srShieldStations.length;i++){
+    var st=srShieldStations[i];
+    if(st.state==='cooldown'){
+      st.cooldownTimer -= dt;
+      if(st.cooldownTimer<=0){ st.state='ready'; st.cooldownTimer=0; st.fillTimer=0; }
+      continue;
+    }
+    if(player.alive && dst(player.x,player.y,st.x,st.y) < SR_SHIELD_STATION_RADIUS+player.r){
+      st.fillTimer += dt;
+      player.hp = Math.min(player.maxHp, player.hp + player.maxHp*(dt/SR_SHIELD_FILL_MS));
+      if(st.fillTimer>=SR_SHIELD_FILL_MS){
+        player.hp = player.maxHp;
+        st.state='cooldown'; st.cooldownTimer=SR_SHIELD_COOLDOWN_MS; st.fillTimer=0;
+      }
+    }
+  }
 }
 // Fixed alternate palette for every mothership, independent of its base
 // ship's own color, so a boss reads as hostile/distinct regardless of
@@ -5910,18 +5958,29 @@ function updateSmugglersRunPhaseTransitions(dt){
       bots=[];
       srReachCheckpoint(1);
       srPhase='chaseBrigade';
+      srBrigadeWaveIndex=0;
       generateSmugglersRunBrigadeWave();
     }
   } else if(srPhase==='chaseBrigade'){
-    // Advances once the whole wave is shot down -- or, as a safety net
-    // against a stray survivor evading forever, once the scroll reaches
-    // checkpoint 2's y regardless (the plan's "or a timer/distance
-    // threshold" fallback).
+    // Waves keep coming until every one of them is cleared -- no distance
+    // fallback letting boss4 spawn early with pirates still alive (the old
+    // shortcut). Clearing one wave immediately spawns the next, right where
+    // the player currently is; only once SR_BRIGADE_WAVE_COUNT waves have
+    // all been shot down does the section's own boss show up.
     var waveCleared = srBrigadeWave.length>0 && srBrigadeWave.every(function(p){ return !p.alive; });
-    if(waveCleared || srScrollY<=srCheckpoints[2].y){
-      srPhase='boss4';
-      srBrigadeWave=[];
-      spawnSmugglersRunBoss(srCheckpoints[2].y-300, SR_BRIGADE_BOSS_SCALE, SR_BRIGADE_BOSS_HP_MULT);
+    if(waveCleared){
+      srBrigadeWaveIndex++;
+      if(srBrigadeWaveIndex>=SR_BRIGADE_WAVE_COUNT){
+        srPhase='boss4';
+        srBrigadeWave=[]; bots=[];
+        // Spawns at the CURRENT scroll position, not the section's original
+        // fixed checkpoint -- waves are now cleared at whatever pace the
+        // player sets, so by the time the last one falls the scroll may be
+        // well past (or short of) where checkpoint 2 used to mark the spot.
+        spawnSmugglersRunBoss(srScrollY-300, SR_BRIGADE_BOSS_SCALE, SR_BRIGADE_BOSS_HP_MULT);
+      } else {
+        generateSmugglersRunBrigadeWave();
+      }
     }
   } else if(srPhase==='boss4'){
     if(bots.length && !bots[0].alive){
@@ -5932,7 +5991,12 @@ function updateSmugglersRunPhaseTransitions(dt){
       // instant this final confrontation begins, replaced by the boss
       // fight itself, which uses that exact same ship type/def.
       if(srSmuggler) srSmuggler.alive=false;
-      spawnSmugglersRunBoss(srCheckpoints[2].y-300, SR_FINAL_BOSS_SCALE, SR_FINAL_BOSS_HP_MULT, srSmugglerShipDef);
+      // srScrollY, not the stale srCheckpoints[2].y -- boss4 (and so the
+      // scroll position when it died) can now land anywhere depending on
+      // how long the brigade waves took to clear, see the chaseBrigade
+      // branch above. boss4 fights are frozen-scroll, so srScrollY here is
+      // exactly where it died.
+      spawnSmugglersRunBoss(srScrollY-300, SR_FINAL_BOSS_SCALE, SR_FINAL_BOSS_HP_MULT, srSmugglerShipDef);
     }
   } else if(srPhase==='finalMothership'){
     if(bots.length && !bots[0].alive){
@@ -5941,7 +6005,10 @@ function updateSmugglersRunPhaseTransitions(dt){
       // The 6th and final core: added uncarried at the boss's death spot,
       // so it's picked up normally like the opening 5 rather than auto-
       // granted -- flying away with it still requires actually reaching it.
-      srCores.push({x:finalDeathX, y:finalDeathY, carriedBy:null, sold:false});
+      // Guarded by the same cap the asteroid/pirate bonus drops respect: if
+      // a lucky bonus core already brought the run's total to 6, there's
+      // nothing left to add -- the run never has more than 6 cores in it.
+      if(srCores.length<6) srCores.push({x:finalDeathX, y:finalDeathY, carriedBy:null, sold:false});
       // No 4th entry in srCheckpoints (that array is documented/sized for
       // exactly the 3 mid-run bosses) -- set srCurrentCheckpoint directly
       // instead, same {y,phase} shape srReachCheckpoint itself would
@@ -6020,6 +6087,106 @@ function drawSmugglersRunSellStation(){
   ctx.font='bold 13px Arial';
   ctx.textAlign='center';
   ctx.fillText('SELL', 0, -84);
+  ctx.restore();
+}
+// Fuel refill stations -- these already worked mechanically (proximity
+// check in updateSmugglersRun) but were never actually drawn, so the
+// player had no way to see or aim for one. A cyan fuel-can glyph inside a
+// pulsing ring, same visual weight as the other station types.
+function drawSmugglersRunFuelStation(st){
+  var pulse=0.8+0.2*Math.sin(performance.now()*0.003 + st.x);
+  ctx.save();
+  ctx.translate(st.x,st.y);
+  try{
+    var g=ctx.createRadialGradient(0,0,0,0,0,SR_FUEL_REFILL_RADIUS+20);
+    g.addColorStop(0,'rgba(0,212,255,0.20)');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.beginPath(); ctx.arc(0,0,SR_FUEL_REFILL_RADIUS+20,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
+  }catch(e){}
+  ctx.strokeStyle='#00d4ff'; ctx.lineWidth=2; ctx.setLineDash([8,6]);
+  ctx.beginPath(); ctx.arc(0,0,SR_FUEL_REFILL_RADIUS*pulse,0,Math.PI*2); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.shadowColor='#00d4ff'; ctx.shadowBlur=12;
+  ctx.fillStyle='#00d4ff';
+  ctx.beginPath();
+  ctx.moveTo(-9,10); ctx.lineTo(-9,-6); ctx.lineTo(-4,-11); ctx.lineTo(6,-11); ctx.lineTo(6,-6);
+  ctx.lineTo(9,-6); ctx.lineTo(9,10); ctx.closePath(); ctx.fill();
+  ctx.fillStyle='rgba(0,10,20,0.85)';
+  ctx.fillRect(-6,-3,12,9);
+  ctx.restore();
+}
+// Warp cores in the open air (5 spilled at the opening boss's wreck, the
+// 6th at the final boss's) -- same hexagonal pulsing-gem look as
+// drawWarpCore, but always visible (this mode has no concealment
+// mechanic) and in the mode's own amber, matching the HUD core dots.
+function drawSmugglersRunCore(c){
+  var pulse=0.75+0.25*Math.sin(performance.now()*0.006+c.x);
+  ctx.save();
+  ctx.translate(c.x,c.y);
+  ctx.shadowColor='#ffb020'; ctx.shadowBlur=16*pulse;
+  ctx.fillStyle='#ffb020';
+  ctx.beginPath();
+  for(var i=0;i<6;i++){
+    var a=(i/6)*Math.PI*2;
+    var r=9*pulse;
+    if(i===0) ctx.moveTo(Math.cos(a)*r,Math.sin(a)*r);
+    else ctx.lineTo(Math.cos(a)*r,Math.sin(a)*r);
+  }
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+// Red fog rising from below -- its leading edge trails srScrollY by the same
+// SR_FALLBEHIND_MARGIN used in updateSmugglersRun's damage check, so what's
+// drawn always matches exactly where the DoT actually starts. Drawn as a
+// soft-to-solid red gradient band filling the whole lane width, extending
+// far enough down that it always reads as "the bottom of the world," not a
+// hard-edged rectangle.
+function drawSmugglersRunFog(){
+  var fogY=srScrollY+SR_FALLBEHIND_MARGIN;
+  var thickness=1600;
+  ctx.save();
+  try{
+    var g=ctx.createLinearGradient(0,fogY-140,0,fogY+thickness);
+    g.addColorStop(0,'rgba(255,20,20,0)');
+    g.addColorStop(0.18,'rgba(220,20,20,0.30)');
+    g.addColorStop(1,'rgba(120,0,0,0.92)');
+    ctx.fillStyle=g;
+  }catch(e){ ctx.fillStyle='rgba(150,0,0,0.5)'; }
+  ctx.fillRect(-200,fogY-140,SR_WW+400,thickness+140);
+  ctx.restore();
+}
+// Shield regen stations -- a ring of 6 segments fills in green as the player
+// sits inside the radius (each segment = 1/6 of SR_SHIELD_FILL_MS); once all
+// 6 are lit the player is fully healed and the ring goes solid yellow
+// (cooldown, unusable) until it resets back to empty/green.
+function drawSmugglersRunShieldStation(st){
+  var pulse=0.85+0.15*Math.sin(performance.now()*0.0035+st.x);
+  var cooling=st.state==='cooldown';
+  var color=cooling?'#ffd23c':'#3cff7a';
+  var filledSegs=cooling?6:Math.min(6,Math.floor(st.fillTimer/(SR_SHIELD_FILL_MS/6)));
+  ctx.save();
+  ctx.translate(st.x,st.y);
+  try{
+    var g=ctx.createRadialGradient(0,0,0,0,0,SR_SHIELD_STATION_RADIUS+20);
+    g.addColorStop(0, cooling?'rgba(255,210,60,0.16)':'rgba(60,255,122,0.18)');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.beginPath(); ctx.arc(0,0,SR_SHIELD_STATION_RADIUS+20,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
+  }catch(e){}
+  var segGap=0.12; // radians of gap between each of the 6 segments
+  var segLen=(Math.PI*2/6)-segGap;
+  for(var i=0;i<6;i++){
+    var a0=(i/6)*Math.PI*2 + segGap/2;
+    ctx.beginPath();
+    ctx.arc(0,0,SR_SHIELD_STATION_RADIUS*pulse,a0,a0+segLen);
+    ctx.strokeStyle = i<filledSegs ? color : 'rgba(255,255,255,0.18)';
+    ctx.lineWidth=6;
+    ctx.stroke();
+  }
+  ctx.shadowColor=color; ctx.shadowBlur=cooling?6:12;
+  ctx.fillStyle=color;
+  ctx.beginPath();
+  ctx.moveTo(0,-10); ctx.lineTo(8,-2); ctx.lineTo(8,7); ctx.lineTo(0,12); ctx.lineTo(-8,7); ctx.lineTo(-8,-2);
+  ctx.closePath(); ctx.fill();
   ctx.restore();
 }
 // Shared per-weapon-type firing dispatch for every Smuggler's Run hostile
@@ -6105,17 +6272,21 @@ function makeSmugglersRunPirate(x,y,def){
   p.weaveSeed=rnd(0,Math.PI*2);
   return p;
 }
-// Galaga-style formation: a grid of pirates spread across the lane, placed
-// between checkpoint 1 (section entry) and checkpoint 2's boss trigger.
-// Each keeps its own random roster look/color (no boss-style recolor) so
-// grunts read as visually distinct from the mothership fights. bots[] and
-// srBrigadeWave intentionally alias the same array: bots[] is what every
-// existing update/draw/hit-resolution loop already iterates, and
-// srBrigadeWave is only ever read back (to check "is the wave cleared"),
-// never spliced independently of it.
+// Galaga-style formation: a grid of pirates just ahead of the player's
+// current position (not spread across the whole section) -- each of
+// SR_BRIGADE_WAVE_COUNT waves spawns fresh, right where the player actually
+// is, once the previous one is fully cleared (see updateSmugglersRunPhase
+// Transitions' chaseBrigade branch), so the fight always keeps coming to
+// them rather than requiring a chase back to wherever the section's fixed
+// range happened to place it. Each keeps its own random roster look/color
+// (no boss-style recolor) so grunts read as visually distinct from the
+// mothership fights. bots[] and srBrigadeWave intentionally alias the same
+// array: bots[] is what every existing update/draw/hit-resolution loop
+// already iterates, and srBrigadeWave is only ever read back (to check "is
+// the wave cleared"), never spliced independently of it.
 function generateSmugglersRunBrigadeWave(){
-  var bottomY=srCheckpoints[1].y-400, topY=srCheckpoints[2].y+900;
-  var cols=4, rows=3, pirates=[];
+  var bottomY=srScrollY-100, topY=srScrollY-700;
+  var cols=SR_BRIGADE_WAVE_COLS, rows=SR_BRIGADE_WAVE_ROWS, pirates=[];
   for(var r=0;r<rows;r++){
     for(var c=0;c<cols;c++){
       var x=SR_WW*(0.15+c*0.23);
@@ -6154,9 +6325,11 @@ function updateSmugglersRunCores(){
    and no core drop -- this is a finite field to clear, not an infinite
    resource loop (cores only ever come from mothership fights).
 ===================================================================== */
+var SR_ASTEROID_FLASH_MS=220;   // how long a freshly-hit fragment glows white
+var SR_ASTEROID_GEM_CHANCE=0.35, SR_ASTEROID_CORE_CHANCE=0.06; // rolled on a small asteroid's final destruction
 function makeSmugglersRunAsteroid(x,y,size){
   var jag=[]; for(var j=0;j<9;j++) jag.push(rnd(0.78,1.15));
-  return {x:x, y:y, vx:rnd(-0.3,0.3), vy:rnd(-0.3,0.3), size:size, r:BELT_SIZE_R[size], color:'neutral', jag:jag, spin:rnd(-0.0006,0.0006), spinBase:rnd(0,Math.PI*2)};
+  return {x:x, y:y, vx:rnd(-0.3,0.3), vy:rnd(-0.3,0.3), size:size, r:BELT_SIZE_R[size], color:'neutral', jag:jag, spin:rnd(-0.0006,0.0006), spinBase:rnd(0,Math.PI*2), flashTimer:0};
 }
 // Fills the belt for the whole chaseAsteroids leg -- called once when the
 // run starts (this is currently the run's opening phase, until Stage 7
@@ -6174,11 +6347,22 @@ function hitSmugglersRunAsteroid(ast){
   srAsteroids.splice(idx,1);
   spawnBurst(ast.x, ast.y, '#c98a4b', 10);
   if(ast.size==='large'){
-    srAsteroids.push(makeSmugglersRunAsteroid(ast.x-8, ast.y-8, 'medium'));
-    srAsteroids.push(makeSmugglersRunAsteroid(ast.x+8, ast.y+8, 'medium'));
+    var m1=makeSmugglersRunAsteroid(ast.x-8, ast.y-8, 'medium'); m1.flashTimer=SR_ASTEROID_FLASH_MS; srAsteroids.push(m1);
+    var m2=makeSmugglersRunAsteroid(ast.x+8, ast.y+8, 'medium'); m2.flashTimer=SR_ASTEROID_FLASH_MS; srAsteroids.push(m2);
   } else if(ast.size==='medium'){
-    srAsteroids.push(makeSmugglersRunAsteroid(ast.x-6, ast.y-6, 'small'));
-    srAsteroids.push(makeSmugglersRunAsteroid(ast.x+6, ast.y+6, 'small'));
+    var s1=makeSmugglersRunAsteroid(ast.x-6, ast.y-6, 'small'); s1.flashTimer=SR_ASTEROID_FLASH_MS; srAsteroids.push(s1);
+    var s2=makeSmugglersRunAsteroid(ast.x+6, ast.y+6, 'small'); s2.flashTimer=SR_ASTEROID_FLASH_MS; srAsteroids.push(s2);
+  } else {
+    // Final destruction (small -> gone) -- an occasional reward, not a
+    // guaranteed one: a core is rare and only rolled while the run's total
+    // (5 opening + 1 final, see smugglersRunSpillCoresAndSmuggler and the
+    // final-boss core add) hasn't already reached the required 6, so this
+    // can never push the sell station's requirement past what's obtainable.
+    if(srCores.length<6 && Math.random()<SR_ASTEROID_CORE_CHANCE){
+      srCores.push({x:ast.x, y:ast.y, carriedBy:null, sold:false});
+    } else if(Math.random()<SR_ASTEROID_GEM_CHANCE){
+      spawnGem(ast.x, ast.y);
+    }
   }
 }
 function updateSmugglersRunAsteroids(dt){
@@ -6186,6 +6370,7 @@ function updateSmugglersRunAsteroids(dt){
     var a=srAsteroids[i];
     a.x += a.vx*(dt/16.67); a.y += a.vy*(dt/16.67);
     if(a.x<a.r || a.x>SR_WW-a.r) a.vx*=-1; // bounce off the lane walls -- stay in the corridor
+    if(a.flashTimer>0) a.flashTimer -= dt;
   }
 }
 // Called the instant a mid-run boss dies (wired up as each boss section
@@ -6214,6 +6399,15 @@ function destroySmugglersRunShip(ent, reason){
   if(ent===player){
     dropCarriedCores(player); // world-fixed at the death spot -- recoverable, see smugglersRunRespawn
     srRespawnTimer=900;
+  } else if(srPhase==='chaseBrigade' && srBrigadeWave.indexOf(ent)!==-1){
+    // Same cap-at-6 rule as the asteroid belt's drops -- an occasional
+    // reward per dead pirate, never a guaranteed one, and never able to
+    // push the run's core total past what the sell station requires.
+    if(srCores.length<6 && Math.random()<SR_BRIGADE_CORE_CHANCE){
+      srCores.push({x:ent.x, y:ent.y, carriedBy:null, sold:false});
+    } else if(Math.random()<SR_BRIGADE_GEM_CHANCE){
+      spawnGem(ent.x, ent.y);
+    }
   }
 }
 // Respawns the player at the last checkpoint reached, or restarts the whole
@@ -6635,12 +6829,16 @@ function drawObstacle(o){
 // asteroid (in makeAsteroid) so the shape stays stable frame to frame.
 function drawAsteroid(a){
   var fill = a.color==='A' ? '#00d4ff' : a.color==='B' ? '#ff4444' : '#c98a4b';
+  // Brief hit-flash: only Smuggler's Run asteroids ever set flashTimer (on
+  // the fragments a hit produces, see hitSmugglersRunAsteroid), so this is a
+  // safe no-op for Belt Blast/Gravity Moon asteroids, which never touch it.
+  if(a.flashTimer>0) fill='#ffffff';
   ctx.save();
   ctx.translate(a.x,a.y);
   ctx.rotate(a.spinBase + performance.now()*a.spin);
   ctx.fillStyle=fill;
   ctx.strokeStyle=a.color==='neutral' ? 'rgba(255,210,150,0.5)' : 'rgba(255,255,255,0.6)';
-  ctx.shadowColor=fill; ctx.shadowBlur=6;
+  ctx.shadowColor=fill; ctx.shadowBlur=a.flashTimer>0 ? 14 : 6;
   ctx.lineWidth=1.5;
   ctx.beginPath();
   var n=a.jag.length;
@@ -6721,11 +6919,15 @@ function drawWorld(){
   ctx.shadowBlur=0;
 
   if(gameMode==='gravitymoon') drawGravityMoonGround();
+  if(gameMode==='smugglersrun') drawSmugglersRunFog(); // background layer, drawn before ships/hazards sit on top of it
 
   for(var i=0;i<obstacles.length;i++) drawObstacle(obstacles[i]);
   for(var i=0;i<asteroids.length;i++) drawAsteroid(asteroids[i]);
   for(var i=0;i<gmAsteroids.length;i++) drawAsteroid(gmAsteroids[i]);
   for(var i=0;i<srAsteroids.length;i++) drawAsteroid(srAsteroids[i]);
+  for(var i=0;i<srFuelStations.length;i++) drawSmugglersRunFuelStation(srFuelStations[i]);
+  for(var i=0;i<srShieldStations.length;i++) drawSmugglersRunShieldStation(srShieldStations[i]);
+  for(var i=0;i<srCores.length;i++) if(!srCores[i].carriedBy && !srCores[i].sold) drawSmugglersRunCore(srCores[i]);
   if(srSmuggler && srSmuggler.alive) drawShipShape(srSmuggler);
   if(srPhase==='toSellStation') drawSmugglersRunSellStation();
 
