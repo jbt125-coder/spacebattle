@@ -489,10 +489,10 @@ var SHIPS = [
     id:'wraith', name:'WRAITH', role:'Blink Duelist', color:'#aa55ff', rgb:'170,85,255',
     hp:95, turnRate:0.075, thrustPower:0.26, maxSpeed:8.6, drag:0.985,
     fireRate:230, bulletSpeed:10.5, bulletDamage:7, bulletLife:1800,
-    burstCount:6, burstDelay:70, // each trigger pull fires 6 in a line for the cost of 1 shot
-    comboDamage:true, // landing consecutive hits on the SAME target within one burst ramps damage linearly, 1x/2x/3x/4x/5x/6x (resets every trigger pull)
+    burstCount:5, burstDelay:70, // each trigger pull fires 5 in a line for the cost of 1 shot
+    comboDamage:true, // landing consecutive hits on the SAME target within one burst ramps damage linearly, 1x/2x/3x/4x/5x (resets every trigger pull)
     ability:{name:'PHASE BLINK', icon:'>>', cooldown:8500, duration:1, desc:'Blinks beside the nearest enemy, stunning it for 1.5s and unloading a point-blank burst.'},
-    desc:'Fragile but relentless. Every trigger pull rattles off a line of six rounds for the cost of one shot -- landing hits back-to-back on the same target ramps each successive round\'s damage (7/14/21/28/35/42). Phase Blink teleports Wraith right beside the nearest enemy, freezing it in place for 1.5 seconds and firing a full burst point-blank.'
+    desc:'Fragile but relentless. Every trigger pull rattles off a line of five rounds for the cost of one shot -- landing hits back-to-back on the same target ramps each successive round\'s damage (7/14/21/28/35). Phase Blink teleports Wraith right beside the nearest enemy, freezing it in place for 1.5 seconds and firing a full burst point-blank.'
   },
   {
     id:'longshot', name:'LONGSHOT', role:'Sniper', color:'#ffb020', rgb:'255,176,32',
@@ -1775,16 +1775,19 @@ function updateIdleRegen(dt){
 /* =====================================================================
    AMMO REGEN -- every ship has a 3-shot pool. One shot regenerates every
    AMMO_REGEN_MS, up to MAX_AMMO. Applies to player and bots alike.
-   Gravity Moon regenerates much faster (near-continuous fire) since the
-   mode is built around constantly farming asteroids and fighting for
-   cores -- the default pace felt far too slow for it.
+   Gravity Moon and Smuggler's Run both regenerate much faster (near-
+   continuous fire): Gravity Moon is built around constantly farming
+   asteroids and fighting for cores, and Smuggler's Run throws a steady
+   stream of hazards (asteroids, turrets, a whole pirate brigade, five
+   boss fights) at a mode with no teammates to share the load -- the
+   default pace felt far too slow for either.
 ===================================================================== */
 var GM_AMMO_REGEN_MS = 350;
 function updateAmmoRegen(e, dt){
   if(!e.alive) return;
   if(e.ammo>=MAX_AMMO) return;
   e.ammoRegenTimer += dt;
-  var regenMs = gameMode==='gravitymoon' ? GM_AMMO_REGEN_MS : AMMO_REGEN_MS;
+  var regenMs = (gameMode==='gravitymoon' || gameMode==='smugglersrun') ? GM_AMMO_REGEN_MS : AMMO_REGEN_MS;
   if(e.ammoRegenTimer>=regenMs){
     e.ammoRegenTimer=0;
     e.ammo=Math.min(MAX_AMMO, e.ammo+1);
