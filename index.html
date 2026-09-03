@@ -776,6 +776,7 @@ function gravityMoonSpawnPoint(){
 var SR_WW=1400, SR_WH=16000;
 var SR_SCROLL_PX_PER_MS=0.12;    // forced forward speed during chase phases
 var SR_FALLBEHIND_MARGIN=260;    // px the player may lag behind srScrollY before it's fatal
+var SR_AHEAD_MARGIN=450;         // px the player may race ahead of srScrollY -- a soft wall, not fatal (see updateSmugglersRun)
 var SR_FUEL_MAX=100, SR_FUEL_DRAIN_PER_MS=100/90000, SR_FUEL_REFILL_RADIUS=60;
 var SR_BOSS_HP_MULT=8, SR_BOSS_SCALE=1.4;               // opening + 3 mid-run bosses
 var SR_FINAL_BOSS_HP_MULT=12, SR_FINAL_BOSS_SCALE=1.6;  // final boss, matches the smuggler
@@ -5794,6 +5795,16 @@ function updateSmugglersRun(dt){
   if(player.alive){
     if(SR_SCROLLING_PHASES[srPhase]) srScrollY -= SR_SCROLL_PX_PER_MS*dt;
     if(player.y > srScrollY+SR_FALLBEHIND_MARGIN){ destroySmugglersRunShip(player, 'fell behind'); return; }
+    // Soft wall on the OTHER side -- without this the player can thrust
+    // straight through the top of the screen and keep going indefinitely,
+    // especially during a frozen phase (mothership1/collectCores/any boss
+    // fight) where srScrollY doesn't move at all. That let a fast player
+    // race far past hazard content that hasn't scrolled into place yet
+    // (e.g. blow through the asteroid belt from the wrong end, or past a
+    // boss's own trigger point, before the section has properly begun).
+    // Not fatal like falling behind -- just clamps position, same as the
+    // lane's x walls.
+    if(player.y < srScrollY-SR_AHEAD_MARGIN) player.y = srScrollY-SR_AHEAD_MARGIN;
     srFuel -= SR_FUEL_DRAIN_PER_MS*dt; // drains everywhere, boss fights included -- constant pressure
     for(var i=0;i<srFuelStations.length;i++){
       if(dst(player.x,player.y,srFuelStations[i].x,srFuelStations[i].y) < SR_FUEL_REFILL_RADIUS){ srFuel=SR_FUEL_MAX; break; }
