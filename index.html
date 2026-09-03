@@ -798,6 +798,8 @@ var srCores=[];               // 6 entries {x,y,carriedBy,sold}, same mutate-in-
 var srAsteroids=[];
 var srBrigadeWave=[];
 var srSmuggler=null;          // deliberately NOT in bots[] -- structurally unhittable, pure visual lure
+var srSmugglerShipDef=null;   // the roster ship srSmuggler is flying -- the final mothership (a later stage) reuses this exact type
+var srCollectCoresTimer=0;    // counts down during 'collectCores'; phase advances on all-5-collected or this hitting 0, whichever first
 var srSellStation=null;
 
 function resize(){
@@ -4403,8 +4405,8 @@ function startSmugglersRunGame(){
   warpBases=[]; warpCores=[]; // clear any leftover Warp Core match state (bases/cores are drawn unconditionally)
   asteroids=[]; beltBlastTimeLeft=0; // clear any leftover Belt Blast match state (asteroids are drawn unconditionally)
   gmCores=[]; gmAsteroids=[]; // clear any leftover Gravity Moon match state (pads/cores/asteroids are drawn unconditionally)
-  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; srSellStation={x:SR_WW/2, y:100};
-  srCurrentCheckpoint=null; srFuel=SR_FUEL_MAX; srRespawnTimer=0;
+  srCores=[]; srAsteroids=[]; srBrigadeWave=[]; srSmuggler=null; srSmugglerShipDef=null; srSellStation={x:SR_WW/2, y:100};
+  srCurrentCheckpoint=null; srFuel=SR_FUEL_MAX; srRespawnTimer=0; srCollectCoresTimer=0;
   // One checkpoint per hazard section, reached the instant that section's
   // boss dies (wired up in later build stages) -- these y positions divide
   // the run into 4 roughly-even legs (opening -> belt -> turrets -> brigade
@@ -4422,20 +4424,15 @@ function startSmugglersRunGame(){
     {x:SR_WW/2, y:SR_WH-6300}, {x:SR_WW/2, y:srCheckpoints[1].y},
     {x:SR_WW/2, y:SR_WH-10500}, {x:SR_WW/2, y:srCheckpoints[2].y}
   ];
-  // STAGE 1-4 (mode plumbing + checkpoints/fuel + the asteroid belt): no
-  // opening mothership exists yet to actually kick off the run, so it
-  // starts directly in the belt's chase phase rather than the eventual
-  // opening-mothership phase. Later build stages (7) will change this
-  // default back to 'mothership1' once that fight actually exists.
-  srPhase='chaseAsteroids';
+  srPhase='mothership1';
   srScrollY=SR_WH-200;
-  generateSmugglersRunAsteroidBelt(); // must run after srCheckpoints above -- it reads srCheckpoints[0].y
 
   var pSpawn=smugglersRunSpawnPoint();
   player=makeShipEntity(selectedShip, pSpawn.x, pSpawn.y, true);
   player.angle=-Math.PI/2;
   player.invincible=1500;
   bots=[]; bullets=[]; particles=[]; gems=[]; turrets=[]; gasClouds=[]; killCount=0;
+  spawnSmugglersRunBoss(pSpawn.y-300, SR_BOSS_SCALE, SR_BOSS_HP_MULT); // the opening mothership fight -- must come after the bots=[] reset just above
   gemsCollectedThisMatch=0;
   remotePlayer=null;
   lastGuestInput={turnLeft:false, turnRight:false, thrustOn:false, fireOn:false};
@@ -5771,7 +5768,7 @@ function updateSmugglersRun(dt){
   // still die from lingering bullets/asteroid contact while the player is
   // mid-respawn-delay, and the phase needs to advance the instant that
   // happens rather than waiting for the player to be back in control.
-  updateSmugglersRunPhaseTransitions();
+  updateSmugglersRunPhaseTransitions(dt);
   if(player.alive){
     if(SR_SCROLLING_PHASES[srPhase]) srScrollY -= SR_SCROLL_PX_PER_MS*dt;
     if(player.y > srScrollY+SR_FALLBEHIND_MARGIN){ destroySmugglersRunShip(player, 'fell behind'); return; }
@@ -5839,11 +5836,26 @@ function generateSmugglersRunTurretGauntlet(){
 // phase spawns the boss and freezes the scroll; the boss's death (checked
 // every frame, whatever killed it -- see the critical-pitfall note in the
 // plan) advances the checkpoint and resumes the chase into the next
-// section. boss2 (asteroid belt), boss3 (turret gauntlet) and boss4
-// (pirate brigade) exist as of this stage; the opening/final bosses land
-// in a later stage.
-function updateSmugglersRunPhaseTransitions(){
-  if(srPhase==='chaseAsteroids' && srScrollY<=srCheckpoints[0].y){
+// section. All 4 mid-run/opening bosses (boss1 mothership1, boss2 belt,
+// boss3 turrets, boss4 brigade) exist as of this stage; the final boss
+// lands in a later stage. `dt` is only needed for the collectCores timeout.
+function updateSmugglersRunPhaseTransitions(dt){
+  if(srPhase==='mothership1'){
+    if(bots.length && !bots[0].alive){
+      var deathX=bots[0].x, deathY=bots[0].y; // captured before the clear below
+      bots=[];
+      srPhase='collectCores';
+      srCollectCoresTimer=4000;
+      smugglersRunSpillCoresAndSmuggler(deathX, deathY);
+    }
+  } else if(srPhase==='collectCores'){
+    srCollectCoresTimer -= dt;
+    var allCollected = srCores.length>0 && srCores.every(function(c){ return c.carriedBy===player; });
+    if(allCollected || srCollectCoresTimer<=0){
+      srPhase='chaseAsteroids';
+      generateSmugglersRunAsteroidBelt();
+    }
+  } else if(srPhase==='chaseAsteroids' && srScrollY<=srCheckpoints[0].y){
     srPhase='boss2';
     spawnSmugglersRunBoss(srCheckpoints[0].y-300, SR_BOSS_SCALE, SR_BOSS_HP_MULT);
   } else if(srPhase==='boss2'){
@@ -5882,6 +5894,46 @@ function updateSmugglersRunPhaseTransitions(){
       srPhase='finalMothership';
     }
   }
+}
+// Opening beat: boss1's wreck spills 5 warp cores (the 6th is the smuggler's
+// -- narratively grabbed off-screen, mechanically added once the final
+// boss dies, a later stage) at its death position, and the smuggler NPC
+// launches from the same spot. srSmugglerShipDef is remembered even after
+// the smuggler is later retired (a later stage) so the final mothership
+// can be spawned as the exact same ship type.
+function smugglersRunSpillCoresAndSmuggler(x,y){
+  srCores=[];
+  for(var i=0;i<5;i++){
+    srCores.push({x:x+rnd(-70,70), y:y+rnd(-70,70), carriedBy:null, sold:false});
+  }
+  srSmugglerShipDef=SHIPS[rndI(0,SHIPS.length-1)];
+  srSmuggler=makeShipEntity(srSmugglerShipDef, x, y, false);
+  srSmuggler.angle=-Math.PI/2;
+  srSmuggler.thrusting=true;
+  srSmuggler.weaveSeed=rnd(0,Math.PI*2);
+}
+// Drives the fleeing smuggler NPC -- deliberately kept outside bots[]
+// (see its declaration) so no weapon-hit/collision path can ever touch it,
+// making it a pure visual lure rather than a real combat target. Heads
+// generally "up" the lane (-y, toward the finish) with a gentle weave, and
+// nudges away laterally if the player closes to within 260px. Forward
+// progress is a direct position update (not velocity/drag physics, unlike
+// every other ship) at a guaranteed 1.15x the scroll's own rate, so simply
+// playing forward can never out-scroll and catch it early; a floor just
+// ahead of the sell station keeps it from drifting into absurd territory
+// during the many boss fights still to come before it's ever caught up to.
+function updateSmugglerAI(dt){
+  if(!srSmuggler || !srSmuggler.alive) return;
+  var s=srSmuggler;
+  s.weaveTimer=(s.weaveTimer||0)+dt;
+  var weaveX=Math.sin(s.weaveTimer*0.0012+s.weaveSeed)*1.4;
+  var awayX=0;
+  if(dst(s.x,s.y,player.x,player.y)<260){ awayX=(s.x<player.x?-1:1)*1.2; }
+  s.x=clamp(s.x+weaveX+awayX, s.r, SR_WW-s.r);
+  s.y=Math.max(s.y - SR_SCROLL_PX_PER_MS*dt*1.15, srSellStation.y+400);
+  s.angle=-Math.PI/2;
+  s.trail.push({x:s.x,y:s.y});
+  if(s.trail.length>16) s.trail.shift();
 }
 // Shared per-weapon-type firing dispatch for every Smuggler's Run hostile
 // AI (boss and brigade pirate alike): reuses whatever weapon the ship's
@@ -6093,6 +6145,14 @@ function smugglersRunRespawn(){
   srScrollY=y;
   srPhase=phase;
   srFuel=SR_FUEL_MAX; // must refill here -- otherwise a zero-fuel death respawns straight into another zero-fuel death next frame
+  if(!srCurrentCheckpoint){
+    // No checkpoint reached yet -- a genuine full restart of the opening
+    // encounter, not just a position reset: fresh boss1, any spilled
+    // cores/the smuggler wiped, matching the locked "restart from scratch"
+    // requirement (there's nothing earlier to fall back to).
+    srCores=[]; srSmuggler=null; srSmugglerShipDef=null;
+    spawnSmugglersRunBoss(y-300, SR_BOSS_SCALE, SR_BOSS_HP_MULT);
+  }
 }
 
 /* =====================================================================
@@ -6244,7 +6304,7 @@ function update(dt){
   if(gameMode==='warpcore') updateWarpCores(dt);
   if(gameMode==='beltblast') updateAsteroids(dt);
   if(gameMode==='gravitymoon'){ updateGravityMoonAsteroids(dt); updateGravityMoonCorePickup(); }
-  if(gameMode==='smugglersrun'){ updateSmugglersRun(dt); updateSmugglersRunAsteroids(dt); } // updateSmugglersRun must run before updateCamera below -- it drives CAM.y
+  if(gameMode==='smugglersrun'){ updateSmugglersRun(dt); updateSmugglersRunAsteroids(dt); updateSmugglerAI(dt); } // updateSmugglersRun must run before updateCamera below -- it drives CAM.y
   updateShieldStation(dt);
   updateTractorPull(dt);
   updateIdleRegen(dt);
@@ -6579,6 +6639,7 @@ function drawWorld(){
   for(var i=0;i<asteroids.length;i++) drawAsteroid(asteroids[i]);
   for(var i=0;i<gmAsteroids.length;i++) drawAsteroid(gmAsteroids[i]);
   for(var i=0;i<srAsteroids.length;i++) drawAsteroid(srAsteroids[i]);
+  if(srSmuggler && srSmuggler.alive) drawShipShape(srSmuggler);
 
   drawShieldStation();
   for(var i=0;i<nebulaClouds.length;i++) drawNebulaCloud(nebulaClouds[i]);
