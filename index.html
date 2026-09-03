@@ -281,6 +281,7 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
     <div class="hud-lbl" id="srCoresLbl" style="margin-top:6px;display:none;">CORES</div>
     <div class="hud-val" id="srCoresVal" style="font-size:14px;color:#00d4ff;text-shadow:0 0 10px rgba(0,212,255,0.6);display:none;">0/6</div>
     <div id="srCoreDots" style="display:none;margin-top:4px;"></div>
+    <div id="srPhaseStrip" style="display:none;margin-top:6px;font-size:10px;letter-spacing:0.5px;"></div>
   </div>
 </div>
 
@@ -4537,6 +4538,15 @@ function endGame(won, reason, customTitle, customSub){
   } else if(reason==='gravitymoonDied'){
     t.textContent='CRASHED'; t.style.color='#ff4444';
     s.textContent='The moon\'s gravity claimed your ship before you could escape.';
+  } else if(reason==='smugglersrunSold'){
+    var srPayout=6*SR_GALACTIC_BUCKS_PER_CORE;
+    progress.galacticBucks += srPayout;
+    saveProgress();
+    t.textContent='CARGO SOLD'; t.style.color='#44ff88';
+    s.textContent='All 6 warp cores delivered to the space station! +$'+srPayout+' Galactic Bucks';
+  } else if(reason==='smugglersrunEmptyHanded'){
+    t.textContent='EMPTY-HANDED'; t.style.color='#ff4444';
+    s.textContent='You reached the station with only '+player.carryingCores.length+' of 6 cores -- nothing to sell.';
   } else if(won){
     t.textContent='VICTORY'; t.style.color='#44ff88';
     if(gemsCollectedThisMatch>=GEMS_TO_WIN){
@@ -4672,6 +4682,18 @@ function updateHUD(){
       srDotsHtml += '<span class="gmCoreDot'+(srHeld?' held':'')+'" style="background:#ffb020;color:#ffb020;"></span>';
     }
     document.getElementById('srCoreDots').innerHTML = srDotsHtml;
+  }
+  document.getElementById('srPhaseStrip').style.display = isSmugglersRun ? '' : 'none';
+  if(isSmugglersRun){
+    var srStageNames=['OPENING','BELT','TURRETS','BRIGADE','FINAL','SELL'];
+    var srStagePhases=[['mothership1','collectCores'],['chaseAsteroids','boss2'],['chaseTurrets','boss3'],['chaseBrigade','boss4'],['finalMothership'],['toSellStation']];
+    var srStripHtml='';
+    for(var ssi=0;ssi<srStageNames.length;ssi++){
+      var srActive = srStagePhases[ssi].indexOf(srPhase)!==-1;
+      srStripHtml += '<span style="color:'+(srActive?'#ffd23c':'#557')+';'+(srActive?'text-shadow:0 0 8px rgba(255,210,60,0.7);':'')+'">'+srStageNames[ssi]+'</span>';
+      if(ssi<srStageNames.length-1) srStripHtml += ' <span style="color:#446;">&gt;</span> ';
+    }
+    document.getElementById('srPhaseStrip').innerHTML = srStripHtml;
   }
 
   // Ammo pips: filled dot per available shot, empty outline per spent shot
@@ -5892,6 +5914,33 @@ function updateSmugglersRunPhaseTransitions(dt){
       bots=[];
       srReachCheckpoint(2);
       srPhase='finalMothership';
+      // The smuggler "flies into its own mothership" -- retired the
+      // instant this final confrontation begins, replaced by the boss
+      // fight itself, which uses that exact same ship type/def.
+      if(srSmuggler) srSmuggler.alive=false;
+      spawnSmugglersRunBoss(srCheckpoints[2].y-300, SR_FINAL_BOSS_SCALE, SR_FINAL_BOSS_HP_MULT, srSmugglerShipDef);
+    }
+  } else if(srPhase==='finalMothership'){
+    if(bots.length && !bots[0].alive){
+      var finalDeathX=bots[0].x, finalDeathY=bots[0].y;
+      bots=[];
+      // The 6th and final core: added uncarried at the boss's death spot,
+      // so it's picked up normally like the opening 5 rather than auto-
+      // granted -- flying away with it still requires actually reaching it.
+      srCores.push({x:finalDeathX, y:finalDeathY, carriedBy:null, sold:false});
+      // No 4th entry in srCheckpoints (that array is documented/sized for
+      // exactly the 3 mid-run bosses) -- set srCurrentCheckpoint directly
+      // instead, same {y,phase} shape srReachCheckpoint itself would
+      // produce, so a death during the toSellStation cruise respawns here
+      // rather than forcing a full re-fight of the final boss.
+      srCurrentCheckpoint={y:finalDeathY, phase:'toSellStation'};
+      srFuel=SR_FUEL_MAX;
+      srPhase='toSellStation';
+    }
+  } else if(srPhase==='toSellStation'){
+    if(player.alive && dst(player.x,player.y,srSellStation.x,srSellStation.y) < SR_FUEL_REFILL_RADIUS){
+      if(player.carryingCores.length>=6) endGame(true,'smugglersrunSold');
+      else endGame(false,'smugglersrunEmptyHanded');
     }
   }
 }
@@ -5934,6 +5983,30 @@ function updateSmugglerAI(dt){
   s.angle=-Math.PI/2;
   s.trail.push({x:s.x,y:s.y});
   if(s.trail.length>16) s.trail.shift();
+}
+// The cash-out destination for the final leg (toSellStation) -- a gold
+// dashed ring/glow, same visual weight as drawWarpBase's own gradient-plus-
+// dashed-circle style, distinct in color (gold, not team-blue/red) since
+// there's no team here.
+function drawSmugglersRunSellStation(){
+  var st=srSellStation;
+  ctx.save();
+  ctx.translate(st.x,st.y);
+  try{
+    var g=ctx.createRadialGradient(0,0,0,0,0,100);
+    g.addColorStop(0,'rgba(255,210,60,0.22)');
+    g.addColorStop(1,'rgba(0,0,0,0)');
+    ctx.beginPath(); ctx.arc(0,0,100,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
+  }catch(e){}
+  ctx.strokeStyle='#ffd23c'; ctx.lineWidth=2.5; ctx.setLineDash([10,8]);
+  ctx.beginPath(); ctx.arc(0,0,75,0,Math.PI*2); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.shadowColor='#ffd23c'; ctx.shadowBlur=14;
+  ctx.fillStyle='#ffd23c';
+  ctx.font='bold 13px Arial';
+  ctx.textAlign='center';
+  ctx.fillText('SELL', 0, -84);
+  ctx.restore();
 }
 // Shared per-weapon-type firing dispatch for every Smuggler's Run hostile
 // AI (boss and brigade pirate alike): reuses whatever weapon the ship's
@@ -6640,6 +6713,7 @@ function drawWorld(){
   for(var i=0;i<gmAsteroids.length;i++) drawAsteroid(gmAsteroids[i]);
   for(var i=0;i<srAsteroids.length;i++) drawAsteroid(srAsteroids[i]);
   if(srSmuggler && srSmuggler.alive) drawShipShape(srSmuggler);
+  if(srPhase==='toSellStation') drawSmugglersRunSellStation();
 
   drawShieldStation();
   for(var i=0;i<nebulaClouds.length;i++) drawNebulaCloud(nebulaClouds[i]);
