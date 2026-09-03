@@ -5712,7 +5712,13 @@ function updateBullets(dt){
       }
     }
 
-    if(bl.life<=0 || bl.x<0||bl.x>WW||bl.y<0||bl.y>WH) removed=true;
+    // Smuggler's Run's lane is far taller than the shared WW/WH arena size
+    // (16000 vs 1900) -- checking bounds against the wrong constants would
+    // flag every bullet as out-of-bounds the instant it's fired, since its
+    // y is always past WH.
+    if(gameMode==='smugglersrun'){
+      if(bl.life<=0 || bl.x<0||bl.x>SR_WW||bl.y<0||bl.y>SR_WH) removed=true;
+    } else if(bl.life<=0 || bl.x<0||bl.x>WW||bl.y<0||bl.y>WH) removed=true;
     // A combo-eligible bullet that's being removed without ever landing a
     // hit is a miss -- breaks the streak back to 1x for its next shot.
     if(removed && bl.comboEligible && bl.comboTracker && bl.hitSet.length===0){
@@ -5785,8 +5791,7 @@ function updateSmugglersRun(dt){
 // which roster ship it's randomly based on.
 var SR_BOSS_COLOR='#ff2a6d', SR_BOSS_RGB='255,42,109';
 // Spawns a mothership-tier boss into bots[] -- reused for all 5 boss
-// fights across the run (this stage only triggers it for the asteroid
-// belt's boss; the mid-run/opening/final ones land in later stages).
+// fights across the run (opening/final ones land in a later stage).
 function spawnSmugglersRunBoss(y, scale, hpMult, bossDef){
   bossDef = bossDef || SHIPS[rndI(0,SHIPS.length-1)];
   var boss=makeShipEntity(bossDef, SR_WW/2, y, false);
@@ -5800,13 +5805,43 @@ function spawnSmugglersRunBoss(y, scale, hpMult, bossDef){
   bots=[boss];
   return boss;
 }
+// Turret gauntlet (section 2): stationary hostile turrets scattered along
+// the lane between checkpoint 0 and checkpoint 1's boss trigger. Reuses the
+// existing Seraph-turret entity/update/draw path unchanged -- ownerEnt:null
+// is safe since isEnemyOf is unconditionally true in this mode (no teams,
+// see isEnemyOf's smugglersrun case), and the existing "one enemy bullet
+// destroys a turret" rule (updateBullets) already gives the player a way
+// to shoot a path through rather than only dodge. Tagged srGauntlet so the
+// boss3 transition below can clear exactly these and nothing else -- a
+// live Space Station Deputy Drone (also in turrets[], followOwner set)
+// must survive that clear.
+function spawnSmugglersRunTurret(x,y){
+  turrets.push({
+    x:x, y:y, angle:0, alive:true, color:SR_BOSS_COLOR, ownerEnt:null,
+    fireTimer:rnd(0,TURRET_FIRE_RATE), comboStreak:0, srGauntlet:true
+  });
+}
+function generateSmugglersRunTurretGauntlet(){
+  var topY=srCheckpoints[1].y+700, bottomY=srCheckpoints[0].y-400;
+  var count=8;
+  for(var i=0;i<count;i++){
+    var frac = count>1 ? i/(count-1) : 0;
+    var y = bottomY - (bottomY-topY)*frac;
+    // Alternates which half of the lane each turret sits in so the gauntlet
+    // reads as a weaving corridor rather than a wall down one side.
+    var x = (i%2===0) ? rnd(140, SR_WW*0.42) : rnd(SR_WW*0.58, SR_WW-140);
+    spawnSmugglersRunTurret(x,y);
+  }
+}
 // Checkpoint-section boss fight boundaries. Each mid-run boss is
 // encountered right at its checkpoint's coordinate ("the boss guards the
 // checkpoint") -- reaching that y while still in the section's chase
 // phase spawns the boss and freezes the scroll; the boss's death (checked
 // every frame, whatever killed it -- see the critical-pitfall note in the
 // plan) advances the checkpoint and resumes the chase into the next
-// section. Only the asteroid-belt leg (boss2) exists as of this stage.
+// section. boss2 (asteroid belt) and boss3 (turret gauntlet) exist as of
+// this stage; boss4 (pirate brigade) and the opening/final bosses land in
+// later stages.
 function updateSmugglersRunPhaseTransitions(){
   if(srPhase==='chaseAsteroids' && srScrollY<=srCheckpoints[0].y){
     srPhase='boss2';
@@ -5816,6 +5851,17 @@ function updateSmugglersRunPhaseTransitions(){
       bots=[]; // clear immediately -- must happen well before the bot's own respawnTimer could ever fire
       srReachCheckpoint(0);
       srPhase='chaseTurrets';
+      generateSmugglersRunTurretGauntlet();
+    }
+  } else if(srPhase==='chaseTurrets' && srScrollY<=srCheckpoints[1].y){
+    srPhase='boss3';
+    for(var gi=turrets.length-1; gi>=0; gi--){ if(turrets[gi].srGauntlet) turrets.splice(gi,1); }
+    spawnSmugglersRunBoss(srCheckpoints[1].y-300, SR_BOSS_SCALE, SR_BOSS_HP_MULT);
+  } else if(srPhase==='boss3'){
+    if(bots.length && !bots[0].alive){
+      bots=[];
+      srReachCheckpoint(1);
+      srPhase='chaseBrigade';
     }
   }
 }
