@@ -24,6 +24,7 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 #hudLeft{display:flex;flex-direction:column;gap:4px;margin-top:6px;}
 #hudRight{text-align:right;display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-top:6px;}
 .hud-lbl{font-size:8px;letter-spacing:3px;color:rgba(0,212,255,0.5);}
+.fuel-badge{width:34px;height:34px;line-height:34px;text-align:center;border-radius:50%;background:radial-gradient(circle at 35% 30%,rgba(0,180,255,0.4),rgba(0,110,220,0.18));border:1.5px solid #00aaff;color:#8fe0ff;text-shadow:0 0 8px rgba(0,180,255,0.85);font-size:7px;letter-spacing:0.5px;}
 .hud-val{font-size:20px;font-weight:700;color:#00d4ff;text-shadow:0 0 12px rgba(0,212,255,0.6);}
 .hud-val.warn{color:#ff4444;text-shadow:0 0 12px rgba(255,68,68,0.6);}
 .gmCoreDot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;border:1px solid rgba(255,255,255,0.3);opacity:0.25;}
@@ -255,7 +256,7 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
     <div id="shieldBar"><div id="shieldFill" style="width:100%"></div></div>
     <div id="bonusShieldBar" style="display:none;"><div id="bonusShieldFill" style="width:100%"></div></div>
     <div id="cloakStatus" style="display:none;font-size:9px;letter-spacing:2px;color:#b060ff;text-shadow:0 0 8px rgba(176,96,255,0.7);margin-top:4px;">CLOAKED</div>
-    <div class="hud-lbl" id="fuelLbl" style="margin-top:6px;display:none;">FUEL</div>
+    <div class="hud-lbl fuel-badge" id="fuelLbl" style="margin-top:6px;display:none;">FUEL</div>
     <div id="fuelBar" style="display:none;"><div id="fuelFill" style="width:100%"></div></div>
     <div class="hud-lbl" style="margin-top:6px;">SHIP</div>
     <div class="hud-val" id="shipNameVal" style="font-size:13px;">-</div>
@@ -4452,8 +4453,9 @@ function startSmugglersRunGame(){
   player=makeShipEntity(selectedShip, pSpawn.x, pSpawn.y, true);
   player.angle=-Math.PI/2;
   player.invincible=1500;
-  bots=[]; bullets=[]; particles=[]; gems=[]; turrets=[]; gasClouds=[]; killCount=0;
+  bots=[]; bullets=[]; particles=[]; gems=[]; turrets=[]; gasClouds=[]; killCount=0; srDuelShots=[];
   spawnSmugglersRunBoss(pSpawn.y-300, SR_BOSS_SCALE, SR_BOSS_HP_MULT); // the opening mothership fight -- must come after the bots=[] reset just above
+  spawnSmugglersRunOpeningSmuggler(pSpawn.x, pSpawn.y-300); // visible from the very start, hovering near boss1 -- see its own comment
   gemsCollectedThisMatch=0;
   remotePlayer=null;
   lastGuestInput={turnLeft:false, turnRight:false, thrustOn:false, fireOn:false};
@@ -5803,7 +5805,14 @@ function updateCamera(dt){
 // fall too far behind it -- "falling behind" is a scored failure condition,
 // not a wall (see resolveObstacles), matching the classic River Raid
 // pressure of the auto-scroll.
-var SR_SCROLLING_PHASES={chaseAsteroids:1, chaseTurrets:1, chaseBrigade:1, toSellStation:1};
+// chaseBrigade is deliberately NOT scrolling (unlike the other chase
+// sections) -- pirates chase the player at a hard-capped 0.35x speed that
+// can fall below the forced scroll rate, so a scrolling brigade fight let
+// stragglers get left behind the red fog forever, unreachable and
+// invisible, making "clear every wave" impossible to actually finish. The
+// screen holds still for the whole multi-wave fight instead, same as any
+// boss encounter.
+var SR_SCROLLING_PHASES={chaseAsteroids:1, chaseTurrets:1, toSellStation:1};
 var srRespawnTimer=0; // counts down after a death, before smugglersRunRespawn() actually repositions the player
 function updateSmugglersRun(dt){
   // Runs regardless of whether the player is currently alive -- a boss can
@@ -5930,11 +5939,14 @@ function updateSmugglersRunPhaseTransitions(dt){
       bots=[];
       srPhase='collectCores';
       srCollectCoresTimer=4000;
-      smugglersRunSpillCoresAndSmuggler(deathX, deathY);
+      smugglersRunSpillCores(deathX, deathY);
     }
   } else if(srPhase==='collectCores'){
     srCollectCoresTimer -= dt;
-    var allCollected = srCores.length>0 && srCores.every(function(c){ return c.carriedBy===player; });
+    // Only the 5 cores actually up for grabs -- the smuggler's own claimed
+    // one (carriedBy srSmuggler from the instant boss1 died) is never meant
+    // to be collectable here, so it must not block this check forever.
+    var allCollected = srCores.length>0 && srCores.every(function(c){ return c.carriedBy===player || c.carriedBy===srSmuggler; });
     if(allCollected || srCollectCoresTimer<=0){
       srPhase='chaseAsteroids';
       generateSmugglersRunAsteroidBelt();
@@ -6002,13 +6014,24 @@ function updateSmugglersRunPhaseTransitions(dt){
     if(bots.length && !bots[0].alive){
       var finalDeathX=bots[0].x, finalDeathY=bots[0].y;
       bots=[];
-      // The 6th and final core: added uncarried at the boss's death spot,
-      // so it's picked up normally like the opening 5 rather than auto-
-      // granted -- flying away with it still requires actually reaching it.
-      // Guarded by the same cap the asteroid/pirate bonus drops respect: if
-      // a lucky bonus core already brought the run's total to 6, there's
-      // nothing left to add -- the run never has more than 6 cores in it.
-      if(srCores.length<6) srCores.push({x:finalDeathX, y:finalDeathY, carriedBy:null, sold:false});
+      // The core the smuggler claimed the instant boss1 died (see
+      // smugglersRunSpillCores) is released right here, at its own
+      // mothership's death spot -- same core object, same color, all
+      // along, rather than a fresh "6th" one conjured from nothing. It's
+      // picked up normally like the opening 5, not auto-granted -- flying
+      // away with it still requires actually reaching it.
+      var releasedSmugglerCore=false;
+      for(var sci=0; sci<srCores.length; sci++){
+        if(srCores[sci].carriedBy===srSmuggler){
+          srCores[sci].carriedBy=null; srCores[sci].x=finalDeathX; srCores[sci].y=finalDeathY;
+          releasedSmugglerCore=true; break;
+        }
+      }
+      // Fallback for the edge case where no core ended up marked as the
+      // smuggler's (e.g. it never got the chance to spawn) -- same cap the
+      // asteroid/pirate bonus drops respect, so the run never ends up with
+      // more than 6 cores in it.
+      if(!releasedSmugglerCore && srCores.length<6) srCores.push({x:finalDeathX, y:finalDeathY, carriedBy:null, sold:false, color:srPickCoreColor()});
       // No 4th entry in srCheckpoints (that array is documented/sized for
       // exactly the 3 mid-run bosses) -- set srCurrentCheckpoint directly
       // instead, same {y,phase} shape srReachCheckpoint itself would
@@ -6025,37 +6048,73 @@ function updateSmugglersRunPhaseTransitions(dt){
     }
   }
 }
-// Opening beat: boss1's wreck spills 5 warp cores (the 6th is the smuggler's
-// -- narratively grabbed off-screen, mechanically added once the final
-// boss dies, a later stage) at its death position, and the smuggler NPC
-// launches from the same spot. srSmugglerShipDef is remembered even after
-// the smuggler is later retired (a later stage) so the final mothership
-// can be spawned as the exact same ship type.
-function smugglersRunSpillCoresAndSmuggler(x,y){
-  srCores=[];
-  for(var i=0;i<5;i++){
-    srCores.push({x:x+rnd(-70,70), y:y+rnd(-70,70), carriedBy:null, sold:false});
-  }
+// A random pick from Gravity Moon's own core palette -- reused here so a
+// bonus core (asteroid/pirate drops) reads as visually consistent with the
+// main 6, rather than the plain uncolored amber they used to be.
+function srPickCoreColor(){ return GM_PAD_COLORS[rndI(0,GM_PAD_COLORS.length-1)].hex; }
+// Spawns the smuggler NPC visible from the very start of the opening
+// mothership fight -- hovering just off to boss1's side, not fleeing yet --
+// rather than only appearing once boss1 is already dead, so the whole
+// "rival ship caught in its own mothership's crossfire" beat reads as one
+// continuous scene, not a sudden pop-in. srSmugglerShipDef is remembered
+// even after the smuggler is later retired so the final mothership can be
+// spawned as the exact same ship type.
+function spawnSmugglersRunOpeningSmuggler(bossX,bossY){
   srSmugglerShipDef=SHIPS[rndI(0,SHIPS.length-1)];
-  srSmuggler=makeShipEntity(srSmugglerShipDef, x, y, false);
+  srSmuggler=makeShipEntity(srSmugglerShipDef, bossX+130, bossY+70, false);
   srSmuggler.angle=-Math.PI/2;
   srSmuggler.thrusting=true;
   srSmuggler.weaveSeed=rnd(0,Math.PI*2);
 }
-// Drives the fleeing smuggler NPC -- deliberately kept outside bots[]
-// (see its declaration) so no weapon-hit/collision path can ever touch it,
-// making it a pure visual lure rather than a real combat target. Heads
-// generally "up" the lane (-y, toward the finish) with a gentle weave, and
-// nudges away laterally if the player closes to within 260px. Forward
-// progress is a direct position update (not velocity/drag physics, unlike
-// every other ship) at a guaranteed 1.15x the scroll's own rate, so simply
-// playing forward can never out-scroll and catch it early; a floor just
-// ahead of the sell station keeps it from drifting into absurd territory
-// during the many boss fights still to come before it's ever caught up to.
+// Opening beat: boss1's wreck spills all 6 warp cores at its death
+// position, each a distinct color (matching Gravity Moon's own palette) --
+// and the smuggler, already hovering nearby (see spawnSmugglersRunOpening
+// Smuggler), instantly swoops onto and claims one of them for itself before
+// breaking off to flee, leaving the other 5 for the player to actually
+// collect. The claimed core stays marked carriedBy the smuggler the whole
+// run -- see updateSmugglersRunPhaseTransitions' finalMothership branch,
+// which releases this exact same core (same object, same color) once the
+// smuggler's own mothership finally goes down, rather than conjuring a
+// fresh "6th" core from nothing.
+function smugglersRunSpillCores(x,y){
+  var palette=GM_PAD_COLORS.slice();
+  for(var i=palette.length-1;i>0;i--){ var j=rndI(0,i); var t=palette[i]; palette[i]=palette[j]; palette[j]=t; }
+  srCores=[];
+  for(var i=0;i<6;i++){
+    srCores.push({x:x+rnd(-70,70), y:y+rnd(-70,70), carriedBy:null, sold:false, color:palette[i].hex});
+  }
+  showAlert('THOSE CORES ARE MINE!', 2200);
+  if(srSmuggler) srCores[5].carriedBy=srSmuggler; // one core claimed on sight -- the other 5 are the player's to grab
+}
+// Drives the smuggler NPC -- deliberately kept outside bots[] (see its
+// declaration) so no weapon-hit/collision path can ever touch it, making it
+// a pure visual lure rather than a real combat target. During mothership1
+// it just hovers/weaves near its own boss, watching the fight (see
+// updateSmugglersRunDuelFx for the boss firing on it, purely cosmetic);
+// once that boss dies it switches to fleeing for real. Heads generally "up"
+// the lane (-y, toward the finish) with a gentle weave, and nudges away
+// laterally if the player closes to within 260px. Forward progress is a
+// direct position update (not velocity/drag physics, unlike every other
+// ship) at a guaranteed 1.15x the scroll's own rate, so simply playing
+// forward can never out-scroll and catch it early; a floor just ahead of
+// the sell station keeps it from drifting into absurd territory during the
+// many boss fights still to come before it's ever caught up to.
 function updateSmugglerAI(dt){
   if(!srSmuggler || !srSmuggler.alive) return;
   var s=srSmuggler;
   s.weaveTimer=(s.weaveTimer||0)+dt;
+  if(srPhase==='mothership1'){
+    var boss=bots[0];
+    var anchorX = boss ? boss.x+130 : s.x, anchorY = boss ? boss.y+70 : s.y;
+    var weaveX=Math.sin(s.weaveTimer*0.001+s.weaveSeed)*30;
+    var weaveY=Math.cos(s.weaveTimer*0.0008+s.weaveSeed)*22;
+    s.x=clamp(anchorX+weaveX, s.r, SR_WW-s.r);
+    s.y=anchorY+weaveY;
+    s.angle=-Math.PI/2;
+    s.trail.push({x:s.x,y:s.y});
+    if(s.trail.length>16) s.trail.shift();
+    return;
+  }
   var weaveX=Math.sin(s.weaveTimer*0.0012+s.weaveSeed)*1.4;
   var awayX=0;
   if(dst(s.x,s.y,player.x,player.y)<260){ awayX=(s.x<player.x?-1:1)*1.2; }
@@ -6064,6 +6123,47 @@ function updateSmugglerAI(dt){
   s.angle=-Math.PI/2;
   s.trail.push({x:s.x,y:s.y});
   if(s.trail.length>16) s.trail.shift();
+}
+// Purely cosmetic "mothership vs. smuggler" crossfire during the opening
+// duel -- alternating tracers with no collision/damage logic at all (never
+// touches bots[], player, or the real bullets[] array), so it can't
+// accidentally hurt either ship. Boss1's own REAL attack on the player
+// (updateBotAI_SmugglersRunBoss) is untouched; this just layers a visual
+// side-battle on top while that's happening.
+var srDuelShots=[];
+var SR_DUEL_SHOT_INTERVAL=1100, srDuelTimer=0, srDuelBossTurn=true;
+function updateSmugglersRunDuelFx(dt){
+  if(srPhase==='mothership1' && srSmuggler && srSmuggler.alive && bots.length && bots[0].alive){
+    srDuelTimer -= dt;
+    if(srDuelTimer<=0){
+      srDuelTimer=SR_DUEL_SHOT_INTERVAL;
+      var boss=bots[0];
+      var fromX = srDuelBossTurn ? boss.x : srSmuggler.x, fromY = srDuelBossTurn ? boss.y : srSmuggler.y;
+      var toX = srDuelBossTurn ? srSmuggler.x : boss.x, toY = srDuelBossTurn ? srSmuggler.y : boss.y;
+      var a=angTo(fromX,fromY,toX,toY);
+      var spd=6.5;
+      srDuelShots.push({x:fromX,y:fromY,vx:Math.cos(a)*spd,vy:Math.sin(a)*spd,life:900,color:srDuelBossTurn?SR_BOSS_COLOR:(srSmugglerShipDef?srSmugglerShipDef.color:'#fff')});
+      srDuelBossTurn=!srDuelBossTurn;
+    }
+  }
+  for(var i=srDuelShots.length-1;i>=0;i--){
+    var s=srDuelShots[i];
+    s.x+=s.vx*(dt/16.67); s.y+=s.vy*(dt/16.67); s.life-=dt;
+    if(s.life<=0) srDuelShots.splice(i,1);
+  }
+}
+function drawSmugglersRunDuelShots(){
+  for(var i=0;i<srDuelShots.length;i++){
+    var s=srDuelShots[i];
+    ctx.save();
+    ctx.translate(s.x,s.y);
+    ctx.rotate(Math.atan2(s.vy,s.vx));
+    ctx.fillStyle=s.color; ctx.shadowColor=s.color; ctx.shadowBlur=8;
+    ctx.beginPath();
+    ctx.moveTo(7,0); ctx.lineTo(-7,3); ctx.lineTo(-7,-3);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
 }
 // The cash-out destination for the final leg (toSellStation) -- a gold
 // dashed ring/glow, same visual weight as drawWarpBase's own gradient-plus-
@@ -6121,10 +6221,11 @@ function drawSmugglersRunFuelStation(st){
 // mechanic) and in the mode's own amber, matching the HUD core dots.
 function drawSmugglersRunCore(c){
   var pulse=0.75+0.25*Math.sin(performance.now()*0.006+c.x);
+  var col=c.color||'#ffb020';
   ctx.save();
   ctx.translate(c.x,c.y);
-  ctx.shadowColor='#ffb020'; ctx.shadowBlur=16*pulse;
-  ctx.fillStyle='#ffb020';
+  ctx.shadowColor=col; ctx.shadowBlur=16*pulse;
+  ctx.fillStyle=col;
   ctx.beginPath();
   for(var i=0;i<6;i++){
     var a=(i/6)*Math.PI*2;
@@ -6237,28 +6338,37 @@ function updateBotAI_SmugglersRunBoss(b, dt){
 
   smugglersRunFireIfInRange(b, dt, angleToTarget, d, idealRange+150);
 }
-// Lightweight Galaga-style brigade pirate AI: no chase/closing behavior --
-// just drifts generally toward the player (i.e. "down" the lane, +y) with
-// a per-pirate sideways weave, firing whenever in range. Much lower thrust/
-// speed and a shorter range than the boss AI, reading as disposable swarm
-// grunts rather than a real dogfight opponent.
+// Lightweight Galaga-style brigade pirate AI: actually closes on the
+// player's real position (like the boss AI) with a sideways weave layered
+// on top, stopping once within idealRange instead of continuing to thrust
+// straight through. Fixed bug: this used to hardcode a fixed "down the
+// lane" thrust direction and never actually turn toward the player, so a
+// pirate that flew past the player's y just kept drifting the same way
+// forever -- straight into the red fog, gone for good, with no way to ever
+// finish clearing that wave. Much lower thrust/speed and a shorter ideal
+// range than the boss AI, reading as disposable swarm grunts rather than a
+// real dogfight opponent.
 function updateBotAI_SmugglersRunPirate(b, dt){
-  b.thrusting=true;
-  b.weaveTimer = (b.weaveTimer||0) + dt;
-  var weave = Math.sin(b.weaveTimer*0.0015 + b.weaveSeed) * 0.6;
-  b.angle = Math.PI/2 + weave;
-
   var angleToTarget=angTo(b.x,b.y,player.x,player.y);
   var d=dst(b.x,b.y,player.x,player.y);
+  var idealRange=220;
 
-  b.vx += Math.cos(b.angle)*b.def.thrustPower*0.3*(dt/16.67);
-  b.vy += Math.sin(b.angle)*b.def.thrustPower*0.3*(dt/16.67);
+  b.weaveTimer = (b.weaveTimer||0) + dt;
+  var weave = Math.sin(b.weaveTimer*0.0015 + b.weaveSeed) * 0.5;
+  var da=angDiff(b.angle, angleToTarget+weave);
+  b.angle += da*0.1;
+
+  b.thrusting = d>idealRange;
+  if(b.thrusting){
+    b.vx += Math.cos(b.angle)*b.def.thrustPower*0.3*(dt/16.67);
+    b.vy += Math.sin(b.angle)*b.def.thrustPower*0.3*(dt/16.67);
+  }
   b.vx *= b.def.drag; b.vy *= b.def.drag;
   var sp=Math.sqrt(b.vx*b.vx+b.vy*b.vy);
   var maxSp=b.def.maxSpeed*0.35;
   if(sp>maxSp){ b.vx=b.vx/sp*maxSp; b.vy=b.vy/sp*maxSp; }
 
-  smugglersRunFireIfInRange(b, dt, angleToTarget, d, 260);
+  smugglersRunFireIfInRange(b, dt, angleToTarget, d, idealRange+150);
 }
 // Builds one pirate: a full ship entity (so it automatically gets hit by
 // every existing weapon-hit/collision path, exactly like a boss) but with
@@ -6359,7 +6469,7 @@ function hitSmugglersRunAsteroid(ast){
     // final-boss core add) hasn't already reached the required 6, so this
     // can never push the sell station's requirement past what's obtainable.
     if(srCores.length<6 && Math.random()<SR_ASTEROID_CORE_CHANCE){
-      srCores.push({x:ast.x, y:ast.y, carriedBy:null, sold:false});
+      srCores.push({x:ast.x, y:ast.y, carriedBy:null, sold:false, color:srPickCoreColor()});
     } else if(Math.random()<SR_ASTEROID_GEM_CHANCE){
       spawnGem(ast.x, ast.y);
     }
@@ -6404,7 +6514,7 @@ function destroySmugglersRunShip(ent, reason){
     // reward per dead pirate, never a guaranteed one, and never able to
     // push the run's core total past what the sell station requires.
     if(srCores.length<6 && Math.random()<SR_BRIGADE_CORE_CHANCE){
-      srCores.push({x:ent.x, y:ent.y, carriedBy:null, sold:false});
+      srCores.push({x:ent.x, y:ent.y, carriedBy:null, sold:false, color:srPickCoreColor()});
     } else if(Math.random()<SR_BRIGADE_GEM_CHANCE){
       spawnGem(ent.x, ent.y);
     }
@@ -6431,8 +6541,9 @@ function smugglersRunRespawn(){
     // encounter, not just a position reset: fresh boss1, any spilled
     // cores/the smuggler wiped, matching the locked "restart from scratch"
     // requirement (there's nothing earlier to fall back to).
-    srCores=[]; srSmuggler=null; srSmugglerShipDef=null;
+    srCores=[]; srSmuggler=null; srSmugglerShipDef=null; srDuelShots=[];
     spawnSmugglersRunBoss(y-300, SR_BOSS_SCALE, SR_BOSS_HP_MULT);
+    spawnSmugglersRunOpeningSmuggler(SR_WW/2, y-300);
   }
 }
 
@@ -6585,7 +6696,7 @@ function update(dt){
   if(gameMode==='warpcore') updateWarpCores(dt);
   if(gameMode==='beltblast') updateAsteroids(dt);
   if(gameMode==='gravitymoon'){ updateGravityMoonAsteroids(dt); updateGravityMoonCorePickup(); }
-  if(gameMode==='smugglersrun'){ updateSmugglersRun(dt); updateSmugglersRunAsteroids(dt); updateSmugglerAI(dt); } // updateSmugglersRun must run before updateCamera below -- it drives CAM.y
+  if(gameMode==='smugglersrun'){ updateSmugglersRun(dt); updateSmugglersRunAsteroids(dt); updateSmugglerAI(dt); updateSmugglersRunDuelFx(dt); } // updateSmugglersRun must run before updateCamera below -- it drives CAM.y
   updateShieldStation(dt);
   updateTractorPull(dt);
   updateIdleRegen(dt);
@@ -6928,6 +7039,7 @@ function drawWorld(){
   for(var i=0;i<srFuelStations.length;i++) drawSmugglersRunFuelStation(srFuelStations[i]);
   for(var i=0;i<srShieldStations.length;i++) drawSmugglersRunShieldStation(srShieldStations[i]);
   for(var i=0;i<srCores.length;i++) if(!srCores[i].carriedBy && !srCores[i].sold) drawSmugglersRunCore(srCores[i]);
+  if(gameMode==='smugglersrun') drawSmugglersRunDuelShots();
   if(srSmuggler && srSmuggler.alive) drawShipShape(srSmuggler);
   if(srPhase==='toSellStation') drawSmugglersRunSellStation();
 
