@@ -786,6 +786,14 @@ var SR_FINAL_BOSS_HP_MULT=12, SR_FINAL_BOSS_SCALE=1.6;  // final boss, matches t
 var SR_BRIGADE_SHIP_HP=18;       // pirate swarm grunts -- dies in 1-3 hits from most weapons
 var SR_BRIGADE_BOSS_HP_MULT=5, SR_BRIGADE_BOSS_SCALE=1.15; // pirate brigade's own mothership -- roughly 15 hits, smaller than the main bosses
 var SR_BRIGADE_WAVE_COUNT=3, SR_BRIGADE_WAVE_COLS=4, SR_BRIGADE_WAVE_ROWS=2; // 3 waves of 8 -- keep coming until every one is cleared
+// Pirates no longer all appear at once already in formation and armed --
+// each wave enters in staggered batches, flying down from off the top of
+// the screen into its formation slot, invincible and not firing until it
+// actually arrives.
+var SR_BRIGADE_BATCH_SIZE=3;      // how many pirates start their entrance together
+var SR_BRIGADE_BATCH_DELAY=900;   // ms between one batch starting and the next
+var SR_BRIGADE_ENTRY_DROP=420;    // px above (ahead of) its formation slot a pirate starts, off-screen
+var SR_BRIGADE_ENTRY_SPEED=0.10;  // px/ms descent speed while flying in
 var SR_BRIGADE_GEM_CHANCE=0.30, SR_BRIGADE_CORE_CHANCE=0.05; // rolled on each pirate's death, same cap-at-6 rule as asteroid drops
 var SR_GALACTIC_BUCKS_PER_CORE=3; // all 6 required to sell: $18 total
 var SR_SHIELD_STATION_RADIUS=70, SR_SHIELD_FILL_MS=6000, SR_SHIELD_COOLDOWN_MS=15000; // 6 segments over 6s, then a 15s yellow cooldown
@@ -6351,6 +6359,19 @@ function updateBotAI_SmugglersRunBoss(b, dt){
 // range than the boss AI, reading as disposable swarm grunts rather than a
 // real dogfight opponent.
 function updateBotAI_SmugglersRunPirate(b, dt){
+  if(b.entering){
+    if(b.entryDelay>0){
+      b.entryDelay -= dt; // still waiting for its batch's turn -- sits off-screen, doesn't move or fire
+      return;
+    }
+    b.angle=Math.PI/2;
+    b.y=Math.min(b.entryTargetY, b.y+SR_BRIGADE_ENTRY_SPEED*dt);
+    if(b.y>=b.entryTargetY){
+      b.entering=false;
+      b.invincible=0; // fair game the instant it's actually in formation
+    }
+    return;
+  }
   var angleToTarget=angTo(b.x,b.y,player.x,player.y);
   var d=dst(b.x,b.y,player.x,player.y);
   var idealRange=220;
@@ -6375,13 +6396,21 @@ function updateBotAI_SmugglersRunPirate(b, dt){
 // Builds one pirate: a full ship entity (so it automatically gets hit by
 // every existing weapon-hit/collision path, exactly like a boss) but with
 // hp overridden down to SR_BRIGADE_SHIP_HP -- dies in 1-3 hits from most
-// weapons, unlike a mothership.
-function makeSmugglersRunPirate(x,y,def){
-  var p=makeShipEntity(def, x, y, false);
+// weapons, unlike a mothership. Spawns off-screen above its own formation
+// slot (targetY) and staggered by batchIndex (see SR_BRIGADE_BATCH_DELAY) --
+// entering:true + a big invincible window keeps it harmless and unhittable
+// until updateBotAI_SmugglersRunPirate's entry-glide actually lands it
+// there, rather than every pirate in the wave appearing armed at once.
+function makeSmugglersRunPirate(x,targetY,def,batchIndex){
+  var p=makeShipEntity(def, x, targetY-SR_BRIGADE_ENTRY_DROP, false);
   p.angle=Math.PI/2;
   p.maxHp=SR_BRIGADE_SHIP_HP;
   p.hp=SR_BRIGADE_SHIP_HP;
   p.weaveSeed=rnd(0,Math.PI*2);
+  p.entering=true;
+  p.entryTargetY=targetY;
+  p.entryDelay=batchIndex*SR_BRIGADE_BATCH_DELAY;
+  p.invincible=99999; // cleared the instant it finishes entering (see updateBotAI_SmugglersRunPirate)
   return p;
 }
 // Galaga-style formation: a grid of pirates just ahead of the player's
@@ -6392,18 +6421,24 @@ function makeSmugglersRunPirate(x,y,def){
 // them rather than requiring a chase back to wherever the section's fixed
 // range happened to place it. Each keeps its own random roster look/color
 // (no boss-style recolor) so grunts read as visually distinct from the
-// mothership fights. bots[] and srBrigadeWave intentionally alias the same
-// array: bots[] is what every existing update/draw/hit-resolution loop
-// already iterates, and srBrigadeWave is only ever read back (to check "is
-// the wave cleared"), never spliced independently of it.
+// mothership fights. Rather than the whole wave appearing at once already
+// armed, pirates enter in staggered batches of SR_BRIGADE_BATCH_SIZE,
+// flying down from off the top of the screen -- see makeSmugglersRunPirate.
+// bots[] and srBrigadeWave intentionally alias the same array: bots[] is
+// what every existing update/draw/hit-resolution loop already iterates, and
+// srBrigadeWave is only ever read back (to check "is the wave cleared"),
+// never spliced independently of it.
 function generateSmugglersRunBrigadeWave(){
   var bottomY=srScrollY-100, topY=srScrollY-700;
   var cols=SR_BRIGADE_WAVE_COLS, rows=SR_BRIGADE_WAVE_ROWS, pirates=[];
+  var idx=0;
   for(var r=0;r<rows;r++){
     for(var c=0;c<cols;c++){
       var x=SR_WW*(0.15+c*0.23);
       var y=bottomY-(bottomY-topY)*((r+0.5)/rows);
-      pirates.push(makeSmugglersRunPirate(x,y,SHIPS[rndI(0,SHIPS.length-1)]));
+      var batchIndex=Math.floor(idx/SR_BRIGADE_BATCH_SIZE);
+      pirates.push(makeSmugglersRunPirate(x,y,SHIPS[rndI(0,SHIPS.length-1)],batchIndex));
+      idx++;
     }
   }
   bots=pirates;
