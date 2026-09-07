@@ -180,6 +180,7 @@ body{background:#000;overflow:hidden;font-family:'Orbitron','Courier New',monosp
 .challengeReward{color:#ffb020;font-size:9px;white-space:nowrap;}
 .challengeDesc{font-size:9px;color:rgba(200,220,240,0.75);margin-top:4px;line-height:1.35;}
 .challengeProgress{font-size:9px;color:rgba(150,220,180,0.9);margin-top:6px;letter-spacing:0.5px;}
+.challengeDate{font-size:8px;color:rgba(180,190,210,0.6);margin-top:3px;letter-spacing:0.4px;}
 .shipTallyGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:4px;margin-top:6px;}
 .shipTallyItem{font-size:8px;letter-spacing:0.5px;color:rgba(150,180,220,0.5);padding:2px 4px;border-radius:3px;border:1px solid rgba(150,180,220,0.15);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .shipTallyItem.done{color:#44ff88;border-color:rgba(68,255,136,0.4);background:rgba(68,255,136,0.08);}
@@ -565,7 +566,7 @@ var RANDOM_CHALLENGE_MODES=['arena','warpcore','beltblast','gravitymoon'];
 var RANDOM_CHALLENGE_WIN_TARGET=3;
 var RANDOM_CHALLENGE_REWARD=20;
 function modeDisplayName(mode){
-  return mode==='warpcore' ? 'WARP CORE' : mode==='beltblast' ? 'BELT BLAST' : 'BATTLE ARENA';
+  return mode==='warpcore' ? 'WARP CORE' : mode==='beltblast' ? 'BELT BLAST' : mode==='gravitymoon' ? 'GRAVITY MOON' : 'BATTLE ARENA';
 }
 // Rolls 3 challenges with distinct mode+ship combos (retries on a
 // collision -- trivially satisfiable, only 3 of 24 possible combos needed).
@@ -583,24 +584,43 @@ function generateRandomChallenges(){
   return out;
 }
 
-// Weekly Challenges -- all 3 fixed ones are active at once, plus the 3
-// random ones above. The all-ships win tally and its claim are permanent
-// (never reset once earned); the Destructo/Cloak kill trackers/claims and
-// the random challenges all reset on a rolling 7-day cycle from whenever
-// the previous cycle started (checkWeeklyChallengeRefresh).
-function defaultChallenges(){
+// Weekly Challenges -- all 6 fixed ones are active at once, plus the 3
+// random ones above. Every challenge (fixed and random) now resets on its
+// OWN clock: 7 days after it was individually claimed (not a shared
+// week-wide reset), tracked via checkWeeklyChallengeRefresh. A completed-
+// but-unclaimed challenge never expires -- the clock only starts once you
+// tap CLAIM REWARD.
+var CHALLENGE_DEFS=[
+  {id:'allShips', kind:'fleet', mode:'arena', name:'FLEET MASTERY', desc:'Win a Battle Arena match with every ship in the fleet.', gems:25, bucks:25, tallyKey:'allShipsWinTally', claimedKey:'allShipsClaimed', claimedAtKey:'allShipsClaimedAt'},
+  {id:'allShipsWarpcore', kind:'fleet', mode:'warpcore', name:'FLEET MASTERY: WARP CORE', desc:'Win a Warp Core match with every ship in the fleet.', gems:25, bucks:25, tallyKey:'allShipsWarpcoreWinTally', claimedKey:'allShipsWarpcoreClaimed', claimedAtKey:'allShipsWarpcoreClaimedAt'},
+  {id:'allShipsBeltblast', kind:'fleet', mode:'beltblast', name:'FLEET MASTERY: BELT BLAST', desc:'Win a Belt Blast match with every ship in the fleet.', gems:25, bucks:25, tallyKey:'allShipsBeltblastWinTally', claimedKey:'allShipsBeltblastClaimed', claimedAtKey:'allShipsBeltblastClaimedAt'},
+  {id:'allShipsGravitymoon', kind:'fleet', mode:'gravitymoon', name:'FLEET MASTERY: GRAVITY MOON', desc:'Win a Gravity Moon match with every ship in the fleet.', gems:25, bucks:25, tallyKey:'allShipsGravitymoonWinTally', claimedKey:'allShipsGravitymoonClaimed', claimedAtKey:'allShipsGravitymoonClaimedAt'},
+  {id:'destructo', kind:'destructo', name:'DESTRUCTO HUNTER', desc:'Destroy 3 ships with the Destructo Missile.', gems:15, bucks:15, claimedKey:'destructoClaimed', claimedAtKey:'destructoClaimedAt'},
+  {id:'cloak', kind:'cloak', name:'GHOST KILL', desc:'Destroy a ship while cloaked.', gems:15, bucks:15, claimedKey:'cloakClaimed', claimedAtKey:'cloakClaimedAt'}
+];
+var FLEET_MASTERY_DEFS=CHALLENGE_DEFS.filter(function(d){ return d.kind==='fleet'; });
+function makeEmptyShipTally(){
   var tally={};
   for(var i=0;i<SHIPS.length;i++) tally[SHIPS[i].id]=false;
-  return {
-    weekStart: Date.now(),
-    allShipsWinTally: tally,
-    allShipsClaimed: false,
+  return tally;
+}
+function defaultChallenges(){
+  var c={
     destructoKillCount: 0,
     destructoClaimed: false,
+    destructoClaimedAt: null,
     cloakKillDone: false,
     cloakClaimed: false,
+    cloakClaimedAt: null,
     randomChallenges: generateRandomChallenges()
   };
+  for(var i=0;i<FLEET_MASTERY_DEFS.length;i++){
+    var d=FLEET_MASTERY_DEFS[i];
+    c[d.tallyKey]=makeEmptyShipTally();
+    c[d.claimedKey]=false;
+    c[d.claimedAtKey]=null;
+  }
+  return c;
 }
 function defaultProgress(){
   var p={bank:0, ships:{}, galacticBucks:0, pendingUpgrade:null, showInstructions:true, challenges:defaultChallenges()};
@@ -639,22 +659,36 @@ function loadProgress(){
   if(p.pendingUpgrade===undefined) p.pendingUpgrade=null;
   if(typeof p.showInstructions!=='boolean') p.showInstructions=true;
   if(!p.challenges) p.challenges=defaultChallenges();
-  if(!p.challenges.allShipsWinTally) p.challenges.allShipsWinTally={};
-  for(var i=0;i<SHIPS.length;i++){
-    if(typeof p.challenges.allShipsWinTally[SHIPS[i].id]!=='boolean') p.challenges.allShipsWinTally[SHIPS[i].id]=false;
+  // Fill in each fleet-mastery challenge (the original Battle-Arena-only
+  // one, plus the 3 newer per-mode ones an older save never had). A claimed
+  // flag with no matching claimedAt (pre-per-challenge-timer saves) gets
+  // claimedAt backfilled to now, so it starts a fresh 7-day clock instead of
+  // instantly looking expired.
+  for(var i=0;i<FLEET_MASTERY_DEFS.length;i++){
+    var fd=FLEET_MASTERY_DEFS[i];
+    if(!p.challenges[fd.tallyKey]) p.challenges[fd.tallyKey]={};
+    for(var si=0;si<SHIPS.length;si++){
+      if(typeof p.challenges[fd.tallyKey][SHIPS[si].id]!=='boolean') p.challenges[fd.tallyKey][SHIPS[si].id]=false;
+    }
+    if(typeof p.challenges[fd.claimedKey]!=='boolean') p.challenges[fd.claimedKey]=false;
+    if(typeof p.challenges[fd.claimedAtKey]!=='number') p.challenges[fd.claimedAtKey]=p.challenges[fd.claimedKey]?Date.now():null;
   }
-  if(typeof p.challenges.allShipsClaimed!=='boolean') p.challenges.allShipsClaimed=false;
   if(typeof p.challenges.destructoKillCount!=='number') p.challenges.destructoKillCount=0;
   if(typeof p.challenges.destructoClaimed!=='boolean') p.challenges.destructoClaimed=false;
+  if(typeof p.challenges.destructoClaimedAt!=='number') p.challenges.destructoClaimedAt=p.challenges.destructoClaimed?Date.now():null;
   if(typeof p.challenges.cloakKillDone!=='boolean') p.challenges.cloakKillDone=false;
   if(typeof p.challenges.cloakClaimed!=='boolean') p.challenges.cloakClaimed=false;
-  if(typeof p.challenges.weekStart!=='number') p.challenges.weekStart=Date.now();
-  // Migration for saves from before random weekly challenges existed --
-  // roll a fresh set without touching weekStart (not a weekly reset, just
-  // filling in a field an older save never had).
+  if(typeof p.challenges.cloakClaimedAt!=='number') p.challenges.cloakClaimedAt=p.challenges.cloakClaimed?Date.now():null;
+  // Migration for saves from before random weekly challenges existed, or
+  // before each one tracked its own claimedAt.
   if(!Array.isArray(p.challenges.randomChallenges) || p.challenges.randomChallenges.length!==3){
     p.challenges.randomChallenges=generateRandomChallenges();
   }
+  for(var ri=0;ri<p.challenges.randomChallenges.length;ri++){
+    var rcm=p.challenges.randomChallenges[ri];
+    if(typeof rcm.claimedAt!=='number') rcm.claimedAt=rcm.claimed?Date.now():null;
+  }
+  delete p.challenges.weekStart; // superseded by per-challenge claimedAt timers
   if(!p.ships) p.ships={};
   // Fill in any ships missing from an older/partial save
   for(var i=0;i<SHIPS.length;i++){
@@ -666,21 +700,41 @@ function saveProgress(){
   try{ window.localStorage.setItem(SAVE_KEY, JSON.stringify(progress)); }catch(e){}
 }
 progress=loadProgress();
-// Rolling 7-day refresh for the Destructo/Cloak/random weekly challenges --
-// the all-ships win tally is permanent and never touched here. Called at
-// load and again defensively wherever challenge progress is credited, in
-// case the tab's been open across a week boundary.
+// Per-challenge 7-day refresh: each challenge (fixed or random) resets on
+// its OWN clock, starting the moment it's claimed -- not a shared week-wide
+// reset. A completed-but-unclaimed challenge never expires. Called at load
+// and again defensively wherever challenge progress is credited/claimed, in
+// case the tab's been open past one of these individual deadlines.
 function checkWeeklyChallengeRefresh(){
   var now=Date.now();
-  if(now - progress.challenges.weekStart >= WEEK_MS){
-    progress.challenges.weekStart=now;
-    progress.challenges.destructoKillCount=0;
-    progress.challenges.destructoClaimed=false;
-    progress.challenges.cloakKillDone=false;
-    progress.challenges.cloakClaimed=false;
-    progress.challenges.randomChallenges=generateRandomChallenges();
-    saveProgress();
+  var c=progress.challenges;
+  var changed=false;
+  for(var i=0;i<FLEET_MASTERY_DEFS.length;i++){
+    var fd=FLEET_MASTERY_DEFS[i];
+    if(c[fd.claimedKey] && c[fd.claimedAtKey] && now-c[fd.claimedAtKey]>=WEEK_MS){
+      c[fd.tallyKey]=makeEmptyShipTally();
+      c[fd.claimedKey]=false;
+      c[fd.claimedAtKey]=null;
+      changed=true;
+    }
   }
+  if(c.destructoClaimed && c.destructoClaimedAt && now-c.destructoClaimedAt>=WEEK_MS){
+    c.destructoKillCount=0; c.destructoClaimed=false; c.destructoClaimedAt=null;
+    changed=true;
+  }
+  if(c.cloakClaimed && c.cloakClaimedAt && now-c.cloakClaimedAt>=WEEK_MS){
+    c.cloakKillDone=false; c.cloakClaimed=false; c.cloakClaimedAt=null;
+    changed=true;
+  }
+  for(var ri=0;ri<c.randomChallenges.length;ri++){
+    var rc=c.randomChallenges[ri];
+    if(rc.claimed && rc.claimedAt && now-rc.claimedAt>=WEEK_MS){
+      var fresh=generateRandomChallenges()[0]; // reroll just this slot's mode+ship+currency
+      c.randomChallenges[ri]={ mode:fresh.mode, shipId:fresh.shipId, currency:fresh.currency, winCount:0, claimed:false, claimedAt:null };
+      changed=true;
+    }
+  }
+  if(changed) saveProgress();
 }
 checkWeeklyChallengeRefresh();
 
@@ -2846,27 +2900,32 @@ document.getElementById('clearPendingUpgradeBtn').addEventListener('click',funct
 });
 
 /* =====================================================================
-   WEEKLY CHALLENGES -- all 3 are active at once (see creditKillChallenges
-   and the win-tracking in endGame for how progress gets credited). The
-   all-ships win tally/claim is permanent; destructo/cloak progress and
-   claims reset on a rolling 7-day cycle (checkWeeklyChallengeRefresh).
+   WEEKLY CHALLENGES -- all 6 fixed ones (4 fleet-mastery, one per arena
+   mode, plus Destructo/Ghost Kill) are active at once, alongside the 3
+   random ones (see creditKillChallenges and the win-tracking in endGame for
+   how progress gets credited). CHALLENGE_DEFS itself lives earlier in the
+   file (near defaultChallenges) since checkWeeklyChallengeRefresh needs it
+   at load time. Every challenge now resets on its own 7-day-after-claim
+   clock -- see checkWeeklyChallengeRefresh.
 ===================================================================== */
-var CHALLENGE_DEFS=[
-  {id:'allShips', name:'FLEET MASTERY', desc:'Win a Battle Arena match with every ship in the fleet.', gems:25, bucks:25},
-  {id:'destructo', name:'DESTRUCTO HUNTER', desc:'Destroy 3 ships with the Destructo Missile.', gems:15, bucks:15},
-  {id:'cloak', name:'GHOST KILL', desc:'Destroy a ship while cloaked.', gems:15, bucks:15}
-];
+function fmtChallengeDate(ts){
+  if(!ts) return '';
+  var d=new Date(ts);
+  return (d.getMonth()+1)+'/'+d.getDate()+'/'+d.getFullYear();
+}
 function challengeStatus(id){
   var c=progress.challenges;
-  if(id==='allShips'){
+  var def=CHALLENGE_DEFS.filter(function(d){ return d.id===id; })[0];
+  if(def.kind==='fleet'){
+    var tally=c[def.tallyKey];
     var won=0;
-    for(var i=0;i<SHIPS.length;i++){ if(c.allShipsWinTally[SHIPS[i].id]) won++; }
-    return { progressText: won+'/'+SHIPS.length+' ships', complete: won>=SHIPS.length, claimed: c.allShipsClaimed };
+    for(var i=0;i<SHIPS.length;i++){ if(tally[SHIPS[i].id]) won++; }
+    return { progressText: won+'/'+SHIPS.length+' ships', complete: won>=SHIPS.length, claimed: c[def.claimedKey], claimedAt: c[def.claimedAtKey] };
   }
-  if(id==='destructo'){
-    return { progressText: c.destructoKillCount+'/3 kills', complete: c.destructoKillCount>=3, claimed: c.destructoClaimed };
+  if(def.kind==='destructo'){
+    return { progressText: c.destructoKillCount+'/3 kills', complete: c.destructoKillCount>=3, claimed: c.destructoClaimed, claimedAt: c.destructoClaimedAt };
   }
-  return { progressText: c.cloakKillDone ? '1/1 -- done' : '0/1 kills', complete: c.cloakKillDone, claimed: c.cloakClaimed };
+  return { progressText: c.cloakKillDone ? '1/1 -- done' : '0/1 kills', complete: c.cloakKillDone, claimed: c.cloakClaimed, claimedAt: c.cloakClaimedAt };
 }
 function anyChallengeClaimable(){
   checkWeeklyChallengeRefresh();
@@ -2903,13 +2962,16 @@ function refreshChallengesModal(){
       var html='<div class="challengeTop"><span>'+def.name+'</span><span class="challengeReward">'+def.gems+' GEMS + $'+def.bucks+'</span></div>';
       html+='<div class="challengeDesc">'+def.desc+'</div>';
       html+='<div class="challengeProgress">'+s.progressText+'</div>';
-      if(def.id==='allShips'){
+      if(def.kind==='fleet'){
         html+='<div class="shipTallyGrid">';
         for(var si=0;si<SHIPS.length;si++){
-          var done=progress.challenges.allShipsWinTally[SHIPS[si].id];
+          var done=progress.challenges[def.tallyKey][SHIPS[si].id];
           html+='<span class="shipTallyItem'+(done?' done':'')+'">'+(done?'✓ ':'')+SHIPS[si].name+'</span>';
         }
         html+='</div>';
+      }
+      if(s.claimed && s.claimedAt){
+        html+='<div class="challengeDate">Completed '+fmtChallengeDate(s.claimedAt)+' -- resets '+fmtChallengeDate(s.claimedAt+WEEK_MS)+'</div>';
       }
       var btnLabel = s.claimed ? 'CLAIMED' : (s.complete ? 'CLAIM REWARD' : 'IN PROGRESS');
       html+='<button class="challengeClaimBtn'+(s.claimed?' claimed':'')+'" '+((!s.complete||s.claimed)?'disabled':'')+'>'+btnLabel+'</button>';
@@ -2931,6 +2993,9 @@ function refreshChallengesModal(){
       var html='<div class="challengeTop"><span>'+shipName+' -- '+modeName+'</span><span class="challengeReward">'+rewardText+'</span></div>';
       html+='<div class="challengeDesc">Win '+RANDOM_CHALLENGE_WIN_TARGET+' times in '+modeName+' with '+shipName+'.</div>';
       html+='<div class="challengeProgress">'+rc.winCount+'/'+RANDOM_CHALLENGE_WIN_TARGET+' wins</div>';
+      if(rc.claimed && rc.claimedAt){
+        html+='<div class="challengeDate">Completed '+fmtChallengeDate(rc.claimedAt)+' -- resets '+fmtChallengeDate(rc.claimedAt+WEEK_MS)+'</div>';
+      }
       var btnLabel = rc.claimed ? 'CLAIMED' : (complete ? 'CLAIM REWARD' : 'IN PROGRESS');
       html+='<button class="challengeClaimBtn'+(rc.claimed?' claimed':'')+'" '+((!complete||rc.claimed)?'disabled':'')+'>'+btnLabel+'</button>';
       card.innerHTML=html;
@@ -2946,9 +3011,8 @@ function claimChallenge(id){
   var def=CHALLENGE_DEFS.filter(function(d){ return d.id===id; })[0];
   progress.bank += def.gems;
   progress.galacticBucks += def.bucks;
-  if(id==='allShips') progress.challenges.allShipsClaimed=true;
-  else if(id==='destructo') progress.challenges.destructoClaimed=true;
-  else if(id==='cloak') progress.challenges.cloakClaimed=true;
+  progress.challenges[def.claimedKey]=true;
+  progress.challenges[def.claimedAtKey]=Date.now();
   saveProgress();
   showAlert(def.name+' CLAIMED -- +'+def.gems+' GEMS, +$'+def.bucks, 2600);
   refreshChallengesModal();
@@ -2959,6 +3023,7 @@ function claimRandomChallenge(idx){
   var rc=progress.challenges.randomChallenges[idx];
   if(!rc || rc.claimed || rc.winCount<RANDOM_CHALLENGE_WIN_TARGET) return;
   rc.claimed=true;
+  rc.claimedAt=Date.now();
   var rewardText;
   if(rc.currency==='gems'){ progress.bank += RANDOM_CHALLENGE_REWARD; rewardText='+'+RANDOM_CHALLENGE_REWARD+' GEMS'; }
   else { progress.galacticBucks += RANDOM_CHALLENGE_REWARD; rewardText='+$'+RANDOM_CHALLENGE_REWARD; }
@@ -4595,11 +4660,14 @@ function endGame(won, reason, customTitle, customSub){
   }
   document.getElementById('gameOverScreen').classList.remove('hidden');
 
-  if(won && !netRole && gameMode==='arena'){ // Weekly Challenge: track wins per-ship, solo-only, Battle Arena only
-    checkWeeklyChallengeRefresh();
-    if(!progress.challenges.allShipsWinTally[selectedShip.id]){
-      progress.challenges.allShipsWinTally[selectedShip.id]=true;
-      saveProgress();
+  if(won && !netRole){ // Fleet Mastery: track wins per-ship, solo-only, one tally per arena mode (Smuggler's Run excluded)
+    var fmDef=FLEET_MASTERY_DEFS.filter(function(d){ return d.mode===gameMode; })[0];
+    if(fmDef){
+      checkWeeklyChallengeRefresh();
+      if(!progress.challenges[fmDef.tallyKey][selectedShip.id]){
+        progress.challenges[fmDef.tallyKey][selectedShip.id]=true;
+        saveProgress();
+      }
     }
   }
 
